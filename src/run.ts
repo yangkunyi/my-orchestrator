@@ -37,7 +37,6 @@ async function runOne(target: string, ticket: Ticket, config: Config, journal: J
     });
     const first = await settleAfterAgent(target, ticket, wt, journal, pi.lastError);
     if (first === "merged" || first === "failed") return;
-
     if (first === "resolve") {
       await withMergeLock(target, async () => {
         await stamp(target, ticket, "RESOLVING", journal);
@@ -52,9 +51,8 @@ async function runOne(target: string, ticket: Ticket, config: Config, journal: J
         thinkingLevel: config.thinkingLevel,
         prompt: conflictPrompt(ticket.relPath),
       });
+      await settleAfterConflict(target, ticket, wt, journal);
     }
-
-    await settleAfterConflict(target, ticket, wt, journal);
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
     try {
@@ -71,7 +69,40 @@ export async function prepareTarget(target: string): Promise<void> {
   await ensureRunsIgnored(target);
 }
 
-export async function run(target: string, config: Config, journal: Journal): Promise<void> {
+async function promoteReadyAndSelect(
+  target: string,
+  journal: Journal,
+  pendingIds: { has(id: string): boolean },
+  slots: number,
+): Promise<Ticket[]> {
+  return withMergeLock(target, async () => {
+    const current = scanTickets(target);
+    const curMap = byId(current);
+    for (const t of current) {
+      if (t.status === "BLOCKED" && blockersMerged(t, curMap) && !pendingIds.has(t.id)) {
+        await stamp(target, t, "READY", journal);
+      }
+    }
+    const tickets = scanTickets(target);
+    journal.snapshot(tickets);
+    const fresh = byId(tickets);
+    return [...fresh.values()]
+      .filter((t) => startable(t, fresh) && !pendingIds.has(t.id))
+      .slice(0, Math.max(0, slots));
+  });
+}
+
+export async function run(
+  target: string,
+  config: Config,
+  journal: Journal,
+  work: (
+    target: string,
+    ticket: Ticket,
+    config: Config,
+    journal: Journal,
+  ) => Promise<void> = runOne,
+): Promise<void> {
   await prepareTarget(target);
   journal.log(
     `proxy NODE_USE_ENV_PROXY=${process.env.NODE_USE_ENV_PROXY ?? ""} HTTPS_PROXY=${process.env.HTTPS_PROXY ?? process.env.https_proxy ?? ""}`,
@@ -83,26 +114,19 @@ export async function run(target: string, config: Config, journal: Journal): Pro
   const pending = new Map<string, Promise<void>>();
 
   while (true) {
-    await withMergeLock(target, async () => {
-      const current = scanTickets(target);
-      const curMap = byId(current);
-      for (const t of current) {
-        if (t.status === "BLOCKED" && blockersMerged(t, curMap) && !pending.has(t.id)) {
-          await stamp(target, t, "READY", journal);
-        }
-      }
-    });
-    const tickets = scanTickets(target);
-    journal.snapshot(tickets);
-    const fresh = byId(tickets);
-    const canStart = [...fresh.values()].filter((t) => startable(t, fresh) && !pending.has(t.id));
-    const slots = config.concurrency - pending.size;
-    const batch = canStart.slice(0, Math.max(0, slots));
+    const batch = await promoteReadyAndSelect(
+      target,
+      journal,
+      pending,
+      config.concurrency - pending.size,
+    );
 
     if (batch.length === 0 && pending.size === 0) {
-      const left = [...fresh.values()].filter((t) => t.status === "BLOCKED" || t.status === "FAILED");
+      const left = scanTickets(target).filter(
+        (t) => t.status === "BLOCKED" || t.status === "FAILED" || t.status === "READY",
+      );
       if (left.length) {
-        journal.log(`done; remaining BLOCKED/FAILED: ${left.map((t) => `${t.id}:${t.status}`).join(", ")}`);
+        journal.log(`done; remaining: ${left.map((t) => `${t.id}:${t.status}`).join(", ")}`);
       } else {
         journal.log("done");
       }
@@ -111,7 +135,7 @@ export async function run(target: string, config: Config, journal: Journal): Pro
 
     for (const t of batch) {
       journal.log(`start ${t.id}`);
-      const p = runOne(target, t, config, journal).finally(() => {
+      const p = work(target, t, config, journal).finally(() => {
         pending.delete(t.id);
       });
       pending.set(t.id, p);

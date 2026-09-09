@@ -17,8 +17,8 @@ A temporary git worktree for one Ticket execution. Created from Main HEAD when t
 _Avoid_: working copy, clone, sandbox (as a lasting source of truth); symlink `.venv` into the Worktree; `PYTHONPATH` of one Worktree on the Run process
 
 **Git contract**:
-The Orchestrator's post-agent git rules. Stamp RUNNING on Main, then create the Worktree from that HEAD. After the agent, any of these is FAILED: dirty Worktree; no commits on the ticket branch that current Main does not have; empty merge (HEAD unchanged); merge still broken after the Conflict Agent. A merge that creates a commit on Main is MERGED and the Worktree is removed. On conflict, abort on Main; the Conflict Agent works in the Worktree (Main stays clean).
-_Avoid_: comparing the ticket branch to a Main SHA taken before the RUNNING stamp; treating "Already up to date" as MERGED
+The Orchestrator's post-agent git rules. Stamp RUNNING on Main, then create the Worktree from that HEAD. After the agent, any of these is FAILED: dirty Worktree; no commits on the ticket branch that current Main does not have; empty merge (HEAD unchanged); merge still broken after integrating Main or after the Conflict Agent. A merge that creates a commit on Main is MERGED and the Worktree is removed. On conflict, abort on Main; if Main then integrates into the Worktree cleanly, tryMerge again while the lock is still held. The Conflict Agent runs only when that integrate leaves a conflict in the Worktree (Main stays clean).
+_Avoid_: comparing the ticket branch to a Main SHA taken before the RUNNING stamp; treating "Already up to date" as MERGED; returning retry to the scheduler so rematch happens after the lock is released
 
 ## Work units
 
@@ -41,8 +41,8 @@ One Orchestrator process draining Tickets on a Target. Created with an id at sta
 _Avoid_: Ticket (a Run schedules many Tickets); Archon run
 
 **Inspect**:
-`orchestrator inspect <target> [id]` reads Run records. No id: the currently running Run if there is one, otherwise the list of Runs. With id: that Run's pid, DAG snapshot, role session files (`implement.jsonl` / `conflict.jsonl` only), and events.
-_Avoid_: git log as the inspect UI; listing nested Pi subagent jsonl
+`orchestrator inspect <target> [id]` reads Run records. The Journal writes those records; Inspect only reads. No id: the currently running Run if there is one, otherwise the list of Runs. With id: that Run's pid, DAG snapshot, role session files (`implement.jsonl` / `conflict.jsonl` only), and events.
+_Avoid_: git log as the inspect UI; listing nested Pi subagent jsonl; writing Run records from Inspect
 
 **Implementation Agent**:
 A coding-agent session whose working directory is the Ticket's Worktree. It takes one READY Ticket from start to a committed branch that is ready to merge.
@@ -70,8 +70,8 @@ _Avoid_: task order, blocked-by (as scheduling-only); Orchestrator discovering e
 Status while at least one Baseline Dependency is not MERGED.
 
 **READY**:
-Status when every Baseline Dependency is MERGED and the Ticket has not started. The Orchestrator may create a Worktree from current Main HEAD.
-_Avoid_: unblocked (without the create-at-HEAD rule)
+Status when every Baseline Dependency is MERGED and the Ticket has not started. A Ticket is startable only in this Status. BLOCKED with all blockers MERGED is stamped READY under the same lock as the start batch, then a Worktree may be created from current Main HEAD.
+_Avoid_: unblocked (without the create-at-HEAD rule); starting a BLOCKED Ticket because its blockers are MERGED
 
 **RUNNING**:
 Status while the Implementation Agent session is live.

@@ -27,11 +27,13 @@ export async function stamp(
   status: Status,
   journal: Journal,
 ): Promise<void> {
-  setStatusInFile(ticket.absPath, status);
-  await commitFiles(target, [ticket.relPath], `orchestrator: ${ticket.id} Status ${status}`);
-  ticket.status = status;
-  journal.log(`${ticket.id} Status ${status}`);
-  journal.snapshot(scanTickets(target));
+  await withMergeLock(target, async () => {
+    setStatusInFile(ticket.absPath, status);
+    await commitFiles(target, [ticket.relPath], `orchestrator: ${ticket.id} Status ${status}`);
+    ticket.status = status;
+    journal.log(`${ticket.id} Status ${status}`);
+    journal.snapshot(scanTickets(target));
+  });
 }
 
 export async function recoverLeftovers(target: string, journal: Journal): Promise<void> {

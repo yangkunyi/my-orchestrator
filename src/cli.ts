@@ -3,10 +3,10 @@ import { closeSync, existsSync, openSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { cac } from "cac";
 import { loadConfig } from "./config.js";
+import { inspectText } from "./inspect.js";
 import {
   assertNoLiveRun,
   createRun,
-  inspectText,
   openRun,
   type Journal,
 } from "./journal.js";

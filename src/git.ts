@@ -1,8 +1,11 @@
+import { AsyncLocalStorage } from "node:async_hooks";
 import { mkdirSync, appendFileSync, readFileSync, existsSync } from "node:fs";
 import { join } from "node:path";
 import lockfile from "proper-lockfile";
 import { simpleGit } from "simple-git";
 import type { Ticket } from "./tickets.js";
+
+const lockHeld = new AsyncLocalStorage<true>();
 
 function gitClient(cwd: string) {
   return simpleGit({ baseDir: cwd });
@@ -44,12 +47,14 @@ async function ensureGitignoreLine(
   aliases: string[],
   message: string,
 ): Promise<void> {
-  const gi = join(target, ".gitignore");
-  const body = existsSync(gi) ? readFileSync(gi, "utf8") : "";
-  if (gitignoreHas(body, [line, ...aliases])) return;
-  appendFileSync(gi, body.endsWith("\n") || body.length === 0 ? `${line}\n` : `\n${line}\n`);
-  await gitOrThrow(target, ["add", ".gitignore"]);
-  await gitOrThrow(target, ["commit", "-m", message]);
+  await withMergeLock(target, async () => {
+    const gi = join(target, ".gitignore");
+    const body = existsSync(gi) ? readFileSync(gi, "utf8") : "";
+    if (gitignoreHas(body, [line, ...aliases])) return;
+    appendFileSync(gi, body.endsWith("\n") || body.length === 0 ? `${line}\n` : `\n${line}\n`);
+    await gitOrThrow(target, ["add", ".gitignore"]);
+    await gitOrThrow(target, ["commit", "-m", message]);
+  });
 }
 
 export async function ensureWorktreesIgnored(target: string): Promise<void> {
@@ -66,8 +71,10 @@ export async function ensureRunsIgnored(target: string): Promise<void> {
 }
 
 export async function commitFiles(target: string, paths: string[], message: string): Promise<void> {
-  await gitOrThrow(target, ["add", ...paths]);
-  await gitOrThrow(target, ["commit", "-m", message]);
+  await withMergeLock(target, async () => {
+    await gitOrThrow(target, ["add", ...paths]);
+    await gitOrThrow(target, ["commit", "-m", message]);
+  });
 }
 
 /** True iff `maybeAncestor` is an ancestor of `ref` (`git merge-base --is-ancestor`). */
@@ -76,10 +83,12 @@ export async function isAncestor(cwd: string, maybeAncestor: string, ref: string
 }
 
 export async function createWorktree(target: string, ticket: Ticket): Promise<string> {
-  const path = join(target, ticket.worktreeRel);
-  mkdirSync(join(target, "worktrees"), { recursive: true });
-  await gitOrThrow(target, ["worktree", "add", "-b", ticket.branch, path, "HEAD"]);
-  return path;
+  return withMergeLock(target, async () => {
+    const path = join(target, ticket.worktreeRel);
+    mkdirSync(join(target, "worktrees"), { recursive: true });
+    await gitOrThrow(target, ["worktree", "add", "-b", ticket.branch, path, "HEAD"]);
+    return path;
+  });
 }
 
 export async function worktreeDirty(worktree: string): Promise<boolean> {
@@ -97,11 +106,12 @@ async function inMerge(cwd: string): Promise<boolean> {
 }
 
 export async function withMergeLock<T>(target: string, fn: () => Promise<T>): Promise<T> {
+  if (lockHeld.getStore()) return fn();
   const gitDir = await gitOrThrow(target, ["rev-parse", "--git-dir"]);
   const lockTarget = join(target, gitDir);
   const release = await lockfile.lock(lockTarget, { retries: { retries: 30, minTimeout: 200, maxTimeout: 2000 } });
   try {
-    return await fn();
+    return await lockHeld.run(true, fn);
   } finally {
     await release();
   }
@@ -112,17 +122,19 @@ export async function tryMerge(
   target: string,
   branch: string,
 ): Promise<"ok" | "conflict" | "failed" | "empty"> {
-  const before = await gitOrThrow(target, ["rev-parse", "HEAD"]);
-  const r = await git(target, ["merge", "--no-ff", "-m", `orchestrator: merge ${branch}`, branch]);
-  if (r.ok) {
-    const after = await gitOrThrow(target, ["rev-parse", "HEAD"]);
-    return before === after ? "empty" : "ok";
-  }
-  if (await inMerge(target)) {
-    await git(target, ["merge", "--abort"]);
-    return "conflict";
-  }
-  return "failed";
+  return withMergeLock(target, async () => {
+    const before = await gitOrThrow(target, ["rev-parse", "HEAD"]);
+    const r = await git(target, ["merge", "--no-ff", "-m", `orchestrator: merge ${branch}`, branch]);
+    if (r.ok) {
+      const after = await gitOrThrow(target, ["rev-parse", "HEAD"]);
+      return before === after ? "empty" : "ok";
+    }
+    if (await inMerge(target)) {
+      await git(target, ["merge", "--abort"]);
+      return "conflict";
+    }
+    return "failed";
+  });
 }
 
 export async function integrateMainIntoWorktree(
@@ -136,8 +148,10 @@ export async function integrateMainIntoWorktree(
 }
 
 export async function removeWorktreeAndBranch(target: string, ticket: Ticket): Promise<void> {
-  await git(target, ["worktree", "remove", "--force", join(target, ticket.worktreeRel)]);
-  await git(target, ["branch", "-D", ticket.branch]);
+  await withMergeLock(target, async () => {
+    await git(target, ["worktree", "remove", "--force", join(target, ticket.worktreeRel)]);
+    await git(target, ["branch", "-D", ticket.branch]);
+  });
 }
 
 export async function revParse(cwd: string, ref = "HEAD"): Promise<string> {

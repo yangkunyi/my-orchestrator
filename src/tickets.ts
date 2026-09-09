@@ -104,8 +104,7 @@ export function blockersMerged(ticket: Ticket, map: Map<string, Ticket>): boolea
 }
 
 export function startable(ticket: Ticket, map: Map<string, Ticket>): boolean {
-  if (IN_FLIGHT.has(ticket.status) || TERMINAL.has(ticket.status)) return false;
-  return blockersMerged(ticket, map);
+  return ticket.status === "READY" && blockersMerged(ticket, map);
 }
 
 export function leftoverInFlight(tickets: Ticket[]): Ticket[] {

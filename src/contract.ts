@@ -12,16 +12,12 @@ import type { Journal } from "./journal.js";
 import { stamp } from "./status.js";
 import type { Ticket } from "./tickets.js";
 
-export type SettleResult = "merged" | "failed" | "resolve" | "retry";
-
-async function failUnlocked(target: string, ticket: Ticket, reason: string, journal: Journal): Promise<void> {
-  journal.log(`${ticket.id} FAILED: ${reason}`);
-  await stamp(target, ticket, "FAILED", journal);
-}
+export type SettleResult = "merged" | "failed" | "resolve";
 
 export async function fail(target: string, ticket: Ticket, reason: string, journal: Journal): Promise<void> {
   await withMergeLock(target, async () => {
-    await failUnlocked(target, ticket, reason, journal);
+    journal.log(`${ticket.id} FAILED: ${reason}`);
+    await stamp(target, ticket, "FAILED", journal);
   });
 }
 
@@ -61,20 +57,32 @@ export async function settleAfterAgent(
       return "merged";
     }
     if (result === "empty") {
-      await failUnlocked(target, ticket, "merge produced no new commit on Main", journal);
+      await fail(target, ticket, "merge produced no new commit on Main", journal);
       return "failed";
     }
     if (result === "failed") {
-      await failUnlocked(target, ticket, "git merge failed without MERGE_HEAD", journal);
+      await fail(target, ticket, "git merge failed without MERGE_HEAD", journal);
       return "failed";
     }
     await stamp(target, ticket, "CONFLICT", journal);
     const integrated = await integrateMainIntoWorktree(worktree, await revParse(target));
     if (integrated === "failed") {
-      await failUnlocked(target, ticket, "could not merge Main into Worktree", journal);
+      await fail(target, ticket, "could not merge Main into Worktree", journal);
       return "failed";
     }
-    return integrated === "conflict" ? "resolve" : "retry";
+    if (integrated === "conflict") return "resolve";
+    const rematch = await tryMerge(target, ticket.branch);
+    if (rematch === "ok") {
+      await stamp(target, ticket, "MERGED", journal);
+      await removeWorktreeAndBranch(target, ticket);
+      return "merged";
+    }
+    if (rematch === "empty") {
+      await fail(target, ticket, "merge produced no new commit on Main", journal);
+      return "failed";
+    }
+    await fail(target, ticket, "merge still broken after integrating Main", journal);
+    return "failed";
   });
 }
 
@@ -97,9 +105,9 @@ export async function settleAfterConflict(
       return;
     }
     if (second === "empty") {
-      await failUnlocked(target, ticket, "merge produced no new commit on Main", journal);
+      await fail(target, ticket, "merge produced no new commit on Main", journal);
       return;
     }
-    await failUnlocked(target, ticket, "merge still broken after conflict agent", journal);
+    await fail(target, ticket, "merge still broken after conflict agent", journal);
   });
 }
