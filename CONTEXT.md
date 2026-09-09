@@ -13,8 +13,8 @@ The Target's integration branch. A MERGED Ticket is merged into Main; a new Work
 _Avoid_: origin/main (as the required start point), develop, trunk (unless that name is Main for the run)
 
 **Worktree**:
-A temporary git worktree for one Ticket execution. Created from Main HEAD when the Ticket becomes READY; removed after MERGED. Not the long-lived source of truth.
-_Avoid_: working copy, clone, sandbox (as a lasting source of truth)
+A temporary git worktree for one Ticket execution. Created from Main HEAD when the Ticket becomes READY; removed after MERGED. Not the long-lived source of truth. Runtime: the Run PATH includes Target `.venv/bin` when that directory exists. Tests import the Worktree tree via the Target's pytest `pythonpath`, not an editable install of Main.
+_Avoid_: working copy, clone, sandbox (as a lasting source of truth); symlink `.venv` into the Worktree; `PYTHONPATH` of one Worktree on the Run process
 
 **Git contract**:
 The Orchestrator's post-agent git rules. Stamp RUNNING on Main, then create the Worktree from that HEAD. After the agent, any of these is FAILED: dirty Worktree; no commits on the ticket branch that current Main does not have; empty merge (HEAD unchanged); merge still broken after the Conflict Agent. A merge that creates a commit on Main is MERGED and the Worktree is removed. On conflict, abort on Main; the Conflict Agent works in the Worktree (Main stays clean).

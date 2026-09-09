@@ -28,7 +28,7 @@ function childArgs(argv: string[], runId: string): string[] {
   return out;
 }
 
-function detach(journal: Journal, argv: string[], httpProxy: string | undefined): void {
+function detach(journal: Journal, argv: string[], httpProxy: string | undefined, target: string): void {
   const logFile = join(journal.dir, "stdout.log");
   const fd = openSync(logFile, "a");
   const child = spawnDetachedRun({
@@ -36,6 +36,7 @@ function detach(journal: Journal, argv: string[], httpProxy: string | undefined)
     script: argv[1]!,
     args: childArgs(argv, journal.id),
     httpProxy,
+    target,
     stdoutFd: fd,
   });
   closeSync(fd);
@@ -86,6 +87,7 @@ async function runCommand(
       execPath: process.execPath,
       argvSlice1: process.argv.slice(1),
       httpProxy: config.httpProxy,
+      target,
     });
   }
   await prepareTarget(target);
@@ -99,7 +101,7 @@ async function runCommand(
     }
     journal.setPid(process.pid);
     if (flags.detach) {
-      detach(journal, process.argv, config.httpProxy);
+      detach(journal, process.argv, config.httpProxy, target);
       console.log(`run ${journal.id} detached`);
       return;
     }

@@ -7,7 +7,7 @@ import { join } from "node:path";
 import { childEnv, spawnDetachedRun } from "../dist/proxy.js";
 
 const proxy = process.argv[2] ?? "http://127.0.0.1:23379";
-const env = childEnv(proxy);
+const env = childEnv({ httpProxy: proxy, target: process.cwd() });
 const shape =
   env.NODE_USE_ENV_PROXY === "1" &&
   env.HTTPS_PROXY === proxy &&
@@ -38,6 +38,7 @@ try {
     script: "--input-type=module",
     args: ["-e", fetchCode],
     httpProxy: proxy,
+    target: process.cwd(),
     stdoutFd: fd,
   });
   closeSync(fd);
