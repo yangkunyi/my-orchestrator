@@ -1,0 +1,124 @@
+import type { Config } from "./config.js";
+import {
+  conflictPrompt,
+  implementPrompt,
+  runPi,
+  ticketSessionFile,
+} from "./agent.js";
+import { beginTicket, fail, settleAfterAgent, settleAfterConflict } from "./contract.js";
+import {
+  assertCleanMain,
+  ensureRunsIgnored,
+  ensureWorktreesIgnored,
+  withMergeLock,
+} from "./git.js";
+import type { Journal } from "./journal.js";
+import { recoverLeftovers, stamp } from "./status.js";
+import {
+  blockersMerged,
+  scanTickets,
+  startable,
+  byId,
+  type Ticket,
+} from "./tickets.js";
+
+async function runOne(target: string, ticket: Ticket, config: Config, journal: Journal): Promise<void> {
+  const wt = await beginTicket(target, ticket, journal);
+  try {
+    journal.log(`${ticket.id} session ${ticketSessionFile(journal.dir, ticket.id, "implement")}`);
+    const pi = await runPi({
+      cwd: wt,
+      runDir: journal.dir,
+      ticketId: ticket.id,
+      role: "implement",
+      model: config.model,
+      thinkingLevel: config.thinkingLevel,
+      prompt: implementPrompt(ticket.relPath),
+    });
+    const first = await settleAfterAgent(target, ticket, wt, journal, pi.lastError);
+    if (first === "merged" || first === "failed") return;
+
+    if (first === "resolve") {
+      await withMergeLock(target, async () => {
+        await stamp(target, ticket, "RESOLVING", journal);
+      });
+      journal.log(`${ticket.id} session ${ticketSessionFile(journal.dir, ticket.id, "conflict")}`);
+      await runPi({
+        cwd: wt,
+        runDir: journal.dir,
+        ticketId: ticket.id,
+        role: "conflict",
+        model: config.model,
+        thinkingLevel: config.thinkingLevel,
+        prompt: conflictPrompt(ticket.relPath),
+      });
+    }
+
+    await settleAfterConflict(target, ticket, wt, journal);
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    try {
+      await fail(target, ticket, msg, journal);
+    } catch (e) {
+      journal.log(`${ticket.id} FAILED and could not write Status: ${e instanceof Error ? e.message : e}`);
+    }
+  }
+}
+
+export async function prepareTarget(target: string): Promise<void> {
+  await assertCleanMain(target);
+  await ensureWorktreesIgnored(target);
+  await ensureRunsIgnored(target);
+}
+
+export async function run(target: string, config: Config, journal: Journal): Promise<void> {
+  await prepareTarget(target);
+  journal.log(
+    `proxy NODE_USE_ENV_PROXY=${process.env.NODE_USE_ENV_PROXY ?? ""} HTTPS_PROXY=${process.env.HTTPS_PROXY ?? process.env.https_proxy ?? ""}`,
+  );
+  journal.snapshot(scanTickets(target));
+
+  await recoverLeftovers(target, journal);
+
+  const pending = new Map<string, Promise<void>>();
+
+  while (true) {
+    await withMergeLock(target, async () => {
+      const current = scanTickets(target);
+      const curMap = byId(current);
+      for (const t of current) {
+        if (t.status === "BLOCKED" && blockersMerged(t, curMap) && !pending.has(t.id)) {
+          await stamp(target, t, "READY", journal);
+        }
+      }
+    });
+    const tickets = scanTickets(target);
+    journal.snapshot(tickets);
+    const fresh = byId(tickets);
+    const canStart = [...fresh.values()].filter((t) => startable(t, fresh) && !pending.has(t.id));
+    const slots = config.concurrency - pending.size;
+    const batch = canStart.slice(0, Math.max(0, slots));
+
+    if (batch.length === 0 && pending.size === 0) {
+      const left = [...fresh.values()].filter((t) => t.status === "BLOCKED" || t.status === "FAILED");
+      if (left.length) {
+        journal.log(`done; remaining BLOCKED/FAILED: ${left.map((t) => `${t.id}:${t.status}`).join(", ")}`);
+      } else {
+        journal.log("done");
+      }
+      return;
+    }
+
+    for (const t of batch) {
+      journal.log(`start ${t.id}`);
+      const p = runOne(target, t, config, journal).finally(() => {
+        pending.delete(t.id);
+      });
+      pending.set(t.id, p);
+    }
+
+    if (pending.size > 0) {
+      await Promise.race([...pending.values()]);
+    }
+  }
+}

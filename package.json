@@ -1,0 +1,29 @@
+{
+  "name": "orchestrator",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "bin": {
+    "orchestrator": "./dist/cli.js"
+  },
+  "scripts": {
+    "build": "tsc",
+    "start": "node dist/cli.js"
+  },
+  "engines": {
+    "node": ">=22"
+  },
+  "dependencies": {
+    "@earendil-works/pi-coding-agent": "^0.85.1",
+    "cac": "^7.0.0",
+    "pino": "^10.3.1",
+    "proper-lockfile": "^4.1.2",
+    "simple-git": "^3.36.0",
+    "yaml": "^2.8.0"
+  },
+  "devDependencies": {
+    "@types/node": "^22.15.0",
+    "@types/proper-lockfile": "^4.1.4",
+    "typescript": "^5.8.0"
+  }
+}
