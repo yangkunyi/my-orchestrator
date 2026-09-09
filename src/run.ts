@@ -5,15 +5,16 @@ import {
   runPi,
   ticketSessionFile,
 } from "./agent.js";
-import { beginTicket, fail, settleAfterAgent, settleAfterConflict } from "./contract.js";
+import { beginTicket, fail, recoverLeftovers, settleAfterAgent, settleAfterConflict } from "./contract.js";
 import {
   assertCleanMain,
   ensureRunsIgnored,
+  ensureVenvIgnored,
   ensureWorktreesIgnored,
   withMergeLock,
 } from "./git.js";
 import type { Journal } from "./journal.js";
-import { recoverLeftovers, stamp } from "./status.js";
+import { stamp } from "./status.js";
 import {
   blockersMerged,
   scanTickets,
@@ -21,10 +22,18 @@ import {
   byId,
   type Ticket,
 } from "./tickets.js";
+import { syncWorktreeEnv } from "./worktree.js";
 
-async function runOne(target: string, ticket: Ticket, config: Config, journal: Journal): Promise<void> {
+/** One Ticket: READY → MERGED or FAILED. Drain only calls this (or an injected `work`). */
+export async function executeTicket(
+  target: string,
+  ticket: Ticket,
+  config: Config,
+  journal: Journal,
+): Promise<void> {
   const wt = await beginTicket(target, ticket, journal);
   try {
+    await syncWorktreeEnv(wt);
     journal.log(`${ticket.id} session ${ticketSessionFile(journal.dir, ticket.id, "implement")}`);
     const pi = await runPi({
       cwd: wt,
@@ -41,6 +50,7 @@ async function runOne(target: string, ticket: Ticket, config: Config, journal: J
       await withMergeLock(target, async () => {
         await stamp(target, ticket, "RESOLVING", journal);
       });
+      await syncWorktreeEnv(wt);
       journal.log(`${ticket.id} session ${ticketSessionFile(journal.dir, ticket.id, "conflict")}`);
       await runPi({
         cwd: wt,
@@ -67,6 +77,7 @@ export async function prepareTarget(target: string): Promise<void> {
   await assertCleanMain(target);
   await ensureWorktreesIgnored(target);
   await ensureRunsIgnored(target);
+  await ensureVenvIgnored(target);
 }
 
 async function promoteReadyAndSelect(
@@ -101,7 +112,7 @@ export async function run(
     ticket: Ticket,
     config: Config,
     journal: Journal,
-  ) => Promise<void> = runOne,
+  ) => Promise<void> = executeTicket,
 ): Promise<void> {
   await prepareTarget(target);
   journal.log(

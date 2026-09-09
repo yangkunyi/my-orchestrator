@@ -73,7 +73,7 @@ Run records: Target `.scratch/orchestrator/runs/<id>/` (gitignored). Inspect lis
 
 Each cycle the DAG is rebuilt from current `.scratch/` files. Startable Tickets (blockers `MERGED`, not in-flight, not `FAILED`) run up to `concurrency`.
 
-For one Ticket: stamp `RUNNING` on Main, create a Worktree from that HEAD, run the Implementation Agent. Then:
+For one Ticket: stamp `RUNNING` on Main, create a Worktree from that HEAD, run `uv sync --frozen` in the Worktree if it has `pyproject.toml` (again before each agent session; fail → `FAILED`), run the Implementation Agent. Then:
 
 - dirty Worktree, no commits ahead of **current** Main, empty merge, or merge still broken after the Conflict Agent → `FAILED` (Worktree kept)
 - merge that creates a commit on Main → `MERGED` (Worktree removed)

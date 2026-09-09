@@ -3,7 +3,8 @@
 import { mkdtempSync, mkdirSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { lastAssistantError, listRoleSessions } from "../dist/agent.js";
+import { lastAssistantError } from "../dist/agent.js";
+import { listRoleSessions } from "../dist/journal.js";
 
 const runDir = mkdtempSync(join(tmpdir(), "session-error-"));
 const sessions = join(runDir, "sessions", "feat", "01");

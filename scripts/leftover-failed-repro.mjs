@@ -1,15 +1,15 @@
 #!/usr/bin/env node
-/** Repro: leftover in-flight whose branch is already in Main recovers as MERGED. */
+/** Repro: leftover in-flight whose branch is not an ancestor of Main recovers as FAILED; Worktree kept. */
 import { execFileSync } from "node:child_process";
-import { mkdtempSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, mkdtempSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { createWorktree, tryMerge } from "../dist/git.js";
+import { createWorktree } from "../dist/git.js";
 import { recoverLeftovers } from "../dist/contract.js";
 import { stamp } from "../dist/status.js";
 import { scanTickets } from "../dist/tickets.js";
 
-const root = mkdtempSync(join(tmpdir(), "leftover-merged-"));
+const root = mkdtempSync(join(tmpdir(), "leftover-failed-"));
 function git(...args) {
   return execFileSync("git", ["-C", root, ...args], { encoding: "utf8" }).trim();
 }
@@ -43,14 +43,18 @@ writeFileSync(join(wt, "work.txt"), "agent\n");
 execFileSync("git", ["-C", wt, "add", "work.txt"], { encoding: "utf8" });
 execFileSync("git", ["-C", wt, "commit", "-m", "agent work"], { encoding: "utf8" });
 
-await stamp(root, ticket, "MERGING", journal);
-const merge = await tryMerge(root, ticket.branch);
-if (merge !== "ok") throw new Error(`tryMerge expected ok, got ${merge}`);
-
 await recoverLeftovers(root, journal);
 
 const body = readFileSync(join(root, rel), "utf8");
 const status = body.match(/^(?:\*\*)?Status\s*:(?:\*\*)?\s*(\S+)/im)?.[1] ?? "";
-const ok = status === "MERGED";
-console.log(JSON.stringify({ ok, status }));
+const worktreeKept = existsSync(wt);
+let branchKept = false;
+try {
+  git("rev-parse", "--verify", ticket.branch);
+  branchKept = true;
+} catch {
+  branchKept = false;
+}
+const ok = status === "FAILED" && worktreeKept && branchKept;
+console.log(JSON.stringify({ ok, status, worktreeKept, branchKept }));
 if (!ok) process.exit(1);

@@ -1,17 +1,15 @@
 import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
-import { listRoleSessions } from "./agent.js";
-import { listRuns, liveRuns, pidAlive, runDir, type DagSnapshot, type RunMeta } from "./journal.js";
-
-function readMeta(dir: string): RunMeta | undefined {
-  const p = join(dir, "meta.json");
-  if (!existsSync(p)) return undefined;
-  try {
-    return JSON.parse(readFileSync(p, "utf8")) as RunMeta;
-  } catch {
-    return undefined;
-  }
-}
+import {
+  listRoleSessions,
+  listRuns,
+  liveRuns,
+  pidAlive,
+  readMetaFile,
+  runDir,
+  type DagSnapshot,
+  type RunMeta,
+} from "./journal.js";
 
 function runState(meta: RunMeta): string {
   if (meta.status === "running" && meta.pid != null && pidAlive(meta.pid)) {
@@ -71,7 +69,7 @@ function tailEvents(dir: string, n: number): string[] {
 
 export function formatInspect(target: string, id: string): string {
   const dir = runDir(target, id);
-  const meta = readMeta(dir);
+  const meta = readMetaFile(dir);
   if (!meta) throw new Error(`run not found: ${id}`);
   const dag = readDag(dir);
   const events = tailEvents(dir, 100);

@@ -1,12 +1,15 @@
-import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import {
   createAgentSession,
+  createBashToolDefinition,
   ModelRuntime,
   resolveCliModel,
   SessionManager,
+  type ToolDefinition,
 } from "@earendil-works/pi-coding-agent";
 import type { ThinkingLevel } from "./config.js";
+import { prependVenvBin } from "./worktree.js";
 
 export type AgentRole = "implement" | "conflict";
 
@@ -59,6 +62,14 @@ export async function runPi(opts: {
     thinkingLevel: opts.thinkingLevel,
     modelRuntime,
     sessionManager,
+    customTools: [
+      createBashToolDefinition(opts.cwd, {
+        spawnHook: (ctx) => ({
+          ...ctx,
+          env: { ...ctx.env, PATH: prependVenvBin(ctx.env.PATH, opts.cwd) },
+        }),
+      }) as ToolDefinition,
+    ],
   });
   try {
     await session.prompt(opts.prompt);
@@ -83,24 +94,6 @@ export function lastAssistantError(sessionFile: string): string | undefined {
     }
   }
   return last;
-}
-
-/** Role session files only: `multi-user/10/implement.jsonl` relative to sessions/. No nested subagent jsonl. */
-export function listRoleSessions(runDir: string): string[] {
-  const root = join(runDir, "sessions");
-  if (!existsSync(root)) return [];
-  const out: string[] = [];
-  walkRoleSessions(root, "", out);
-  out.sort();
-  return out;
-}
-
-function walkRoleSessions(dir: string, rel: string, out: string[]): void {
-  for (const ent of readdirSync(dir, { withFileTypes: true })) {
-    const r = rel ? `${rel}/${ent.name}` : ent.name;
-    if (ent.isDirectory()) walkRoleSessions(join(dir, ent.name), r, out);
-    else if (ent.name === "implement.jsonl" || ent.name === "conflict.jsonl") out.push(r);
-  }
 }
 
 export function implementPrompt(ticketRelPath: string): string {
