@@ -152,6 +152,38 @@ export async function revParse(cwd: string, ref = "HEAD"): Promise<string> {
   return gitOrThrow(cwd, ["rev-parse", ref]);
 }
 
+export async function worktreeDirty(worktree: string): Promise<boolean> {
+  return (await gitOrThrow(worktree, ["status", "--porcelain"])).length > 0;
+}
+
+/** True iff worktree HEAD has commits that `base` (Main HEAD) does not. */
+export async function hasCommitsAhead(worktree: string, base: string): Promise<boolean> {
+  const n = await gitOrThrow(worktree, ["rev-list", "--count", `${base}..HEAD`]);
+  return Number(n) > 0;
+}
+
+async function inMerge(cwd: string): Promise<boolean> {
+  return (await git(cwd, ["rev-parse", "-q", "--verify", "MERGE_HEAD"])).ok;
+}
+
+/** Try merge on Main. On conflict, abort so Main stays clean. Caller holds withMergeLock. */
+export async function tryMerge(
+  target: string,
+  branch: string,
+): Promise<"ok" | "conflict" | "failed" | "empty"> {
+  const before = await gitOrThrow(target, ["rev-parse", "HEAD"]);
+  const r = await git(target, ["merge", "--no-ff", "-m", `orchestrator: merge ${branch}`, branch]);
+  if (r.ok) {
+    const after = await gitOrThrow(target, ["rev-parse", "HEAD"]);
+    return before === after ? "empty" : "ok";
+  }
+  if (await inMerge(target)) {
+    await git(target, ["merge", "--abort"]);
+    return "conflict";
+  }
+  return "failed";
+}
+
 export async function branchExists(target: string, branch: string): Promise<boolean> {
   return (await git(target, ["show-ref", "--verify", "--quiet", `refs/heads/${branch}`])).ok;
 }
@@ -162,8 +194,7 @@ export async function integrateMainIntoWorktree(
 ): Promise<"ok" | "conflict" | "failed"> {
   const r = await git(worktree, ["merge", "--no-ff", mainRef]);
   if (r.ok) return "ok";
-  const inMerge = await git(worktree, ["rev-parse", "-q", "--verify", "MERGE_HEAD"]);
-  if (inMerge.ok) return "conflict";
+  if (await inMerge(worktree)) return "conflict";
   return "failed";
 }
 
