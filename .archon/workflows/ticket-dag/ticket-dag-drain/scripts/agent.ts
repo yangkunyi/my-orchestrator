@@ -1,7 +1,7 @@
 import type { PackConfig, Runner, ThinkingLevel } from "./config.ts";
 import { ticketSessionFile } from "./session-log.ts";
 
-export type AgentRole = "implement" | "conflict" | "review";
+export type AgentRole = "implement" | "conflict" | "review" | "summary";
 
 /** Implement/conflict wall clock, then session.abort(). */
 export const AGENT_WALL_MS = 2 * 60 * 60 * 1000;

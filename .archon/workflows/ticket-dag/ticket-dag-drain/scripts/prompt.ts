@@ -143,6 +143,31 @@ export function reviewTask(base: string, head: string, log: string): string {
   return `Review the range ${base}...HEAD (HEAD = ${head}) in this repository.\n\nCommits in that range:\n${log || "(none)"}\n`;
 }
 
+/**
+ * The drain-end summary: one agent merges the three reviews for the human. It ranks and dedupes, it
+ * does not review - a fourth opinion on the same diff is not what the axis split bought.
+ */
+export function summaryPersona(base: string): string {
+  return `You are summarizing three independent read-only reviews of git range ${base}...HEAD on this repository, for the human who owns this drain.
+
+You may read the range yourself, read-only: ${BASE_READ_COMMANDS} are yours. Never write: no edits, no commits, no output redirection into files, no mutating git commands. Do not spawn agents or invoke /code-review or /tdd.
+
+Merge the three reviews into one report:
+1. Open with what the range does, in two sentences.
+2. Then the findings that survive: drop duplicates, rank by severity, and keep each to a line or two with file and line.
+3. Then the disagreements, where the reviewers contradict each other - say so and give your call.
+4. Name anything you dropped or demoted, and why. Nothing disappears silently.
+5. Where a section is an error rather than a review, say so in one line.
+
+Do not add findings of your own that no reviewer raised - you rank and merge, you do not review.
+Markdown. Under 600 words.`;
+}
+
+/** The summary's input: the range, the commit menu, and the reviews to merge. */
+export function summaryTask(base: string, head: string, log: string, reviewMd: string): string {
+  return `Git range ${base}...HEAD (HEAD = ${head}).\n\nCommits in that range:\n${log || "(none)"}\n\nThe three reviews (review.md):\n${reviewMd}`;
+}
+
 /** How a runner that carries everything in one message sees a persona plus its task. */
 export function composeMessage(persona: string, task: string): string {
   return `${persona}\n\n${task}`;

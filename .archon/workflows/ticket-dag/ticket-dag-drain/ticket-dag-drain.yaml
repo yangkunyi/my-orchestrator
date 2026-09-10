@@ -43,3 +43,10 @@ nodes:
     depends_on: [drain]
     with:
       config: $INPUTS.config
+  - id: summary
+    script: summary
+    runtime: bun
+    timeout: 2000000
+    depends_on: [review]
+    with:
+      config: $INPUTS.config
