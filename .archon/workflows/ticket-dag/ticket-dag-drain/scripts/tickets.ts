@@ -1,18 +1,6 @@
 import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
-
-export const STATUSES = [
-  "BLOCKED",
-  "READY",
-  "RUNNING",
-  "MERGING",
-  "CONFLICT",
-  "RESOLVING",
-  "MERGED",
-  "FAILED",
-] as const;
-
-export type Status = (typeof STATUSES)[number];
+import { parseStatus, type Status } from "./ticket-line.ts";
 
 const WAYFINDER = new Set(["research", "prototype", "grilling", "task"]);
 const IN_FLIGHT = new Set<Status>(["RUNNING", "MERGING", "CONFLICT", "RESOLVING"]);
@@ -69,8 +57,7 @@ export function scanTickets(target: string): Ticket[] {
       const body = readFileSync(absPath, "utf8");
       const type = parseField(body, "Type");
       if (type && WAYFINDER.has(type.toLowerCase())) continue;
-      const statusRaw = parseField(body, "Status") ?? "BLOCKED";
-      const status = STATUSES.includes(statusRaw as Status) ? (statusRaw as Status) : "BLOCKED";
+      const status = parseStatus(body);
       const { nn, slug } = parsed;
       out.push({
         id: `${feature.name}/${nn}`,

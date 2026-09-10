@@ -2,11 +2,15 @@ import { spawnSync } from "node:child_process";
 import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import type { PackConfig, ThinkingLevel } from "./config.ts";
+import { STATUSES } from "./ticket-line.ts";
 
 export type AgentRole = "implement" | "conflict" | "review";
 
 /** Implement/conflict wall clock, then session.abort(). */
 export const AGENT_WALL_MS = 2 * 60 * 60 * 1000;
+
+/** The Status vocabulary as the prompts spell it. */
+const STATUS_VALUES = STATUSES.map((s) => `\`${s}\``).join(" / ");
 
 const IMPLEMENT_SKILL = `Implement the work described by the user in the spec or tickets.
 
@@ -16,7 +20,7 @@ Run typechecking regularly, single test files regularly, and the full test suite
 
 Commit your work to the current branch.
 
-Leave the ticket file's \`Status:\` line unchanged (\`BLOCKED\` / \`READY\` / \`RUNNING\` / \`MERGING\` / \`CONFLICT\` / \`RESOLVING\` / \`MERGED\` / \`FAILED\`). Those values are owned by \`/to-tickets\` and the Orchestrator, not by implement.`;
+Leave the ticket file's \`Status:\` line unchanged (${STATUS_VALUES}). Those values are owned by \`/to-tickets\` and the Orchestrator, not by implement.`;
 
 const CONFLICT_SKILL = `1. **See the current state** of the merge/rebase. Check git history, and the conflicting files.
 
@@ -28,7 +32,7 @@ const CONFLICT_SKILL = `1. **See the current state** of the merge/rebase. Check 
 
 5. **Finish the merge/rebase.** Stage everything and commit. If rebasing, continue the rebase process until all commits are rebased.
 
-Leave the ticket file's \`Status:\` line unchanged (\`BLOCKED\` / \`READY\` / \`RUNNING\` / \`MERGING\` / \`CONFLICT\` / \`RESOLVING\` / \`MERGED\` / \`FAILED\`). Those values are owned by \`/to-tickets\` and the Orchestrator, not by conflict resolution.`;
+Leave the ticket file's \`Status:\` line unchanged (${STATUS_VALUES}). Those values are owned by \`/to-tickets\` and the Orchestrator, not by conflict resolution.`;
 
 export type PackAgentOpts = {
   cwd: string;

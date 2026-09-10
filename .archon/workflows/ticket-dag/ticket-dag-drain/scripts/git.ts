@@ -12,7 +12,8 @@ import {
 } from "node:fs";
 import { isAbsolute, join, resolve } from "node:path";
 import { promisify } from "node:util";
-import type { Status, Ticket } from "./tickets.ts";
+import { mergeMessage, statusLine, statusMessage, type Status } from "./ticket-line.ts";
+import type { Ticket } from "./tickets.ts";
 
 const execFile = promisify(execFileCb);
 const lockHeld = new AsyncLocalStorage<true>();
@@ -109,18 +110,14 @@ export async function withMergeLock<T>(target: string, fn: () => Promise<T>): Pr
 }
 
 function setStatusInFile(absPath: string, status: Status): void {
-  const body = readFileSync(absPath, "utf8");
-  const next = /^(?:\*\*)?Status\s*:(?:\*\*)?\s*.+$/im.test(body)
-    ? body.replace(/^(?:\*\*)?Status\s*:(?:\*\*)?\s*.+$/im, `Status: ${status}`)
-    : `${body.trimEnd()}\n\nStatus: ${status}\n`;
-  writeFileSync(absPath, next);
+  writeFileSync(absPath, statusLine(readFileSync(absPath, "utf8"), status));
 }
 
 export async function stamp(target: string, ticket: Ticket, status: Status): Promise<void> {
   await withMergeLock(target, async () => {
     setStatusInFile(ticket.absPath, status);
     await gitOrThrow(target, ["add", ticket.relPath]);
-    await gitOrThrow(target, ["commit", "-m", `orchestrator: ${ticket.id} Status ${status}`]);
+    await gitOrThrow(target, ["commit", "-m", statusMessage(ticket.id, status)]);
     ticket.status = status;
   });
 }
@@ -135,7 +132,7 @@ export async function hasTicketMergeCommit(target: string, branch: string): Prom
     const parents = line.slice(0, nul).split(" ").filter(Boolean);
     const subject = line.slice(nul + 1);
     if (parents.length < 2) continue;
-    if (subject !== `orchestrator: merge ${branch}`) continue;
+    if (subject !== mergeMessage(branch)) continue;
     const p2 = parents[1]!;
     const onBranch = await git(target, ["merge-base", "--is-ancestor", p2, branch]);
     if (onBranch.ok) return true;
@@ -172,7 +169,7 @@ export async function tryMerge(
   branch: string,
 ): Promise<"ok" | "conflict" | "failed" | "empty"> {
   const before = await gitOrThrow(target, ["rev-parse", "HEAD"]);
-  const r = await git(target, ["merge", "--no-ff", "-m", `orchestrator: merge ${branch}`, branch]);
+  const r = await git(target, ["merge", "--no-ff", "-m", mergeMessage(branch), branch]);
   if (r.ok) {
     const after = await gitOrThrow(target, ["rev-parse", "HEAD"]);
     return before === after ? "empty" : "ok";
