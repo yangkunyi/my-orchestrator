@@ -8,7 +8,7 @@ import {
   type PackAgentOpts,
   type PackAgentResult,
 } from "./agent.ts";
-import { prependVenvBin } from "./begin.ts";
+import { prependVenvBin } from "./worktree-env.ts";
 
 export async function runPackPi(opts: PackAgentOpts): Promise<PackAgentResult> {
   const {

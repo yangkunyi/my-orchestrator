@@ -202,7 +202,7 @@ function gitignoreHas(body: string, patterns: string[]): boolean {
   return body.split(/\r?\n/).some((l) => patterns.includes(l.trim()));
 }
 
-async function ensureGitignoreLine(
+export async function ensureGitignoreLine(
   target: string,
   line: string,
   aliases: string[],
@@ -216,12 +216,4 @@ async function ensureGitignoreLine(
     await gitOrThrow(target, ["add", ".gitignore"]);
     await gitOrThrow(target, ["commit", "-m", message]);
   });
-}
-
-export async function ensureWorktreesIgnored(target: string): Promise<void> {
-  await ensureGitignoreLine(target, "worktrees/", ["worktrees", "/worktrees/"], "chore(orchestrator): ignore worktrees/");
-}
-
-export async function ensureVenvIgnored(target: string): Promise<void> {
-  await ensureGitignoreLine(target, ".venv/", [".venv", "/.venv/"], "chore(orchestrator): ignore .venv/");
 }

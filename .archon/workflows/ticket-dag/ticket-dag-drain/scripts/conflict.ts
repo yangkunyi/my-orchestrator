@@ -8,7 +8,7 @@ import {
   type AgentRunner,
   type TicketAgentOpts,
 } from "./agent.ts";
-import { syncWorktreeEnv } from "./begin.ts";
+import { syncWorktreeEnv } from "./worktree-env.ts";
 import { loadConfig, type PackConfig } from "./config.ts";
 import { fail, settleAfterConflict } from "./settle.ts";
 import { stamp, withMergeLock } from "./git.ts";

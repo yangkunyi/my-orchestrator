@@ -1,11 +1,7 @@
-import { execFile as execFileCb } from "node:child_process";
 import { existsSync, mkdirSync } from "node:fs";
-import { delimiter, join } from "node:path";
-import { promisify } from "node:util";
+import { join } from "node:path";
 import {
   branchExists,
-  ensureVenvIgnored,
-  ensureWorktreesIgnored,
   git,
   gitOrThrow,
   integrateMainIntoWorktree,
@@ -14,8 +10,7 @@ import {
   withMergeLock,
 } from "./git.ts";
 import type { Ticket } from "./tickets.ts";
-
-const execFile = promisify(execFileCb);
+import { ensureVenvIgnored, ensureWorktreesIgnored, syncWorktreeEnv } from "./worktree-env.ts";
 
 export type BeginOutcome = "ready" | "failed" | "resolve";
 
@@ -25,22 +20,6 @@ export type BeginResult = {
   ok: boolean;
   reason?: string;
 };
-
-export function prependVenvBin(path: string | undefined, worktree: string): string {
-  const bin = join(worktree, ".venv", "bin");
-  if (!existsSync(bin)) return path ?? "";
-  return `${bin}${delimiter}${path ?? ""}`;
-}
-
-export async function syncWorktreeEnv(worktree: string): Promise<void> {
-  if (!existsSync(join(worktree, "pyproject.toml"))) return;
-  try {
-    await execFile("uv", ["sync", "--frozen"], { cwd: worktree, encoding: "utf8" });
-  } catch (e) {
-    const err = e as { stderr?: string; stdout?: string; message?: string };
-    throw new Error(`uv sync --frozen failed: ${(err.stderr || err.stdout || err.message || String(e)).trim()}`);
-  }
-}
 
 async function ensureWorktree(target: string, ticket: Ticket): Promise<string> {
   const path = join(target, ticket.worktreeRel);
