@@ -63,6 +63,32 @@ async function mergeOntoMain(
   return settleMerge(target, ticket, await tryMerge(target, ticket.branch), brokenReason);
 }
 
+export async function settleAfterConflict(
+  target: string,
+  ticket: Ticket,
+  worktree: string,
+  lastError?: string,
+): Promise<"merged" | "failed"> {
+  if (await worktreeDirty(worktree)) {
+    await fail(target, ticket, "worktree dirty after conflict agent");
+    return "failed";
+  }
+  return withMergeLock(target, async () => {
+    const second = await mergeOntoMain(
+      target,
+      ticket,
+      worktree,
+      "merge still broken after conflict agent",
+      lastError,
+    );
+    if (second === "conflict") {
+      await fail(target, ticket, "merge still broken after conflict agent");
+      return "failed";
+    }
+    return second;
+  });
+}
+
 export async function settleAfterAgent(
   target: string,
   ticket: Ticket,

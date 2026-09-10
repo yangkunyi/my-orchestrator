@@ -1,6 +1,6 @@
 import { execFile as execFileCb } from "node:child_process";
 import { existsSync, mkdirSync } from "node:fs";
-import { join } from "node:path";
+import { delimiter, join } from "node:path";
 import { promisify } from "node:util";
 import {
   branchExists,
@@ -25,6 +25,12 @@ export type BeginResult = {
   ok: boolean;
   reason?: string;
 };
+
+export function prependVenvBin(path: string | undefined, worktree: string): string {
+  const bin = join(worktree, ".venv", "bin");
+  if (!existsSync(bin)) return path ?? "";
+  return `${bin}${delimiter}${path ?? ""}`;
+}
 
 export async function syncWorktreeEnv(worktree: string): Promise<void> {
   if (!existsSync(join(worktree, "pyproject.toml"))) return;
