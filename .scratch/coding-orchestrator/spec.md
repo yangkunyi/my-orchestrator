@@ -6,6 +6,8 @@ Glossary: `CONTEXT.md`. Decisions: `docs/adr/`. Module split after the fact: `.s
 
 This Feature records the product that shipped. Tickets are MERGED historical slices, not new work.
 
+Operator surface, leftover rematch by merge commit, and FAILED Worktree resume: `.scratch/operator-surface/spec.md` (ADR-0029–0031).
+
 ## Not Archon
 
 The Orchestrator is a small TypeScript program in this repository (`orchestrator` on PATH). It is not Archon and not an Archon workflow pack.
