@@ -1,7 +1,6 @@
 #!/usr/bin/env bun
 /** Temp-Target repro: pack Pi SDK wiring without a live session. No Archon engine, no repo src/. */
-import { mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import {
   AGENT_WALL_MS,
@@ -15,25 +14,10 @@ import {
   ticketSessionFile,
 } from "../scripts/agent.ts";
 import { REVIEW_TOOLS, REVIEW_WALL_MS, reviewPrompt } from "../scripts/review.ts";
+import { expect, expectEqual, mkTemp, sleep } from "./target.ts";
 
 const executeYaml = join(import.meta.dir, "../../ticket-dag-execute/ticket-dag-execute.yaml");
 const drainYaml = join(import.meta.dir, "../ticket-dag-drain.yaml");
-
-function expect(name: string, cond: unknown, detail?: unknown): void {
-  if (!cond) {
-    throw new Error(`${name}${detail !== undefined ? `: ${JSON.stringify(detail)}` : ""}`);
-  }
-}
-
-function expectEqual(name: string, got: unknown, want: unknown): void {
-  const gs = JSON.stringify(got);
-  const ws = JSON.stringify(want);
-  if (gs !== ws) throw new Error(`${name}: got ${gs}, want ${ws}`);
-}
-
-function sleep(ms: number): Promise<void> {
-  return new Promise((r) => setTimeout(r, ms));
-}
 
 try {
   const impl = implementPrompt(".scratch/feat/issues/01-demo.md");
@@ -52,7 +36,7 @@ try {
   expect("conflict has no /skill: name", !conf.includes("/skill:"));
   expect("conflict has no two-axis review", !conf.includes("## Standards") && !conf.includes("diff-reviewer"));
 
-  const artifacts = mkdtempSync(join(tmpdir(), "pack-agent-art-"));
+  const artifacts = mkTemp("pack-agent-art-");
   try {
     expectEqual(
       "implement session path",

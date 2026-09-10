@@ -1,95 +1,61 @@
 #!/usr/bin/env bun
-/** Leftover with --no-ff merge commit → MERGED, Worktree gone. Temp Target. No Pi, no Archon engine, no repo src/. */
-import { execFileSync } from "node:child_process";
-import { existsSync, mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
-import { join } from "node:path";
+/** Leftover with --no-ff merge commit → MERGED, Worktree gone. No Pi, no Archon engine, no repo src/. */
+import { existsSync } from "node:fs";
 import { rematchLeftovers } from "../scripts/rematch.ts";
-
-const root = mkdtempSync(join(tmpdir(), "pack-leftover-merged-"));
-function git(...args: string[]): string {
-  return execFileSync("git", ["-C", root, ...args], { encoding: "utf8" }).trim();
-}
-
-const rel = ".scratch/feat/issues/01-demo.md";
-const branch = "ticket/feat/01-demo";
-const wtRel = "worktrees/feat-01-demo";
-const wt = join(root, wtRel);
+import {
+  addTicketWorktree,
+  branchExists,
+  commitFile,
+  commitTickets,
+  gitC,
+  statusOf,
+  ticketOf,
+  withTarget,
+  writeTicket,
+} from "./target.ts";
 
 try {
-  git("init", "-b", "main");
-  git("config", "user.name", "test");
-  git("config", "user.email", "test@example.com");
-  writeFileSync(join(root, "README.md"), "x\n");
-  git("add", "README.md");
-  git("commit", "-m", "init");
+  await withTarget(async (root) => {
+    const rel = writeTicket(root, "feat", "01", "demo", "READY", "None");
+    commitTickets(root);
+    writeTicket(root, "feat", "01", "demo", "RUNNING", "None");
+    commitTickets(root, "orchestrator: feat/01 Status RUNNING");
 
-  mkdirSync(join(root, ".scratch/feat/issues"), { recursive: true });
-  writeFileSync(join(root, rel), "# 01\n\n**Blocked by:** None\n\nStatus: READY\n");
-  git("add", rel);
-  git("commit", "-m", "ticket");
+    const ticket = ticketOf(root, "feat/01");
+    const wt = addTicketWorktree(root, ticket);
+    commitFile(wt, "work.txt", "agent\n", "agent work");
 
-  writeFileSync(join(root, rel), "# 01\n\n**Blocked by:** None\n\nStatus: RUNNING\n");
-  git("add", rel);
-  git("commit", "-m", "orchestrator: feat/01 Status RUNNING");
+    writeTicket(root, "feat", "01", "demo", "MERGING", "None");
+    commitTickets(root, "orchestrator: feat/01 Status MERGING");
+    gitC(root, "merge", "--no-ff", "-m", `orchestrator: merge ${ticket.branch}`, ticket.branch);
+    const branchSha = gitC(root, "rev-parse", ticket.branch);
 
-  mkdirSync(join(root, "worktrees"), { recursive: true });
-  git("worktree", "add", "-b", branch, wtRel, "HEAD");
-  writeFileSync(join(wt, "work.txt"), "agent\n");
-  execFileSync("git", ["-C", wt, "add", "work.txt"], { encoding: "utf8" });
-  execFileSync("git", ["-C", wt, "commit", "-m", "agent work"], { encoding: "utf8" });
+    await rematchLeftovers(root);
 
-  writeFileSync(join(root, rel), "# 01\n\n**Blocked by:** None\n\nStatus: MERGING\n");
-  git("add", rel);
-  git("commit", "-m", "orchestrator: feat/01 Status MERGING");
-  git("merge", "--no-ff", "-m", `orchestrator: merge ${branch}`, branch);
-  const branchSha = git("rev-parse", branch);
-
-  await rematchLeftovers(root);
-
-  const body = readFileSync(join(root, rel), "utf8");
-  const status = body.match(/^(?:\*\*)?Status\s*:(?:\*\*)?\s*(\S+)/im)?.[1] ?? "";
-  const worktreeGone = !existsSync(wt);
-  let branchGone = true;
-  try {
-    execFileSync("git", ["-C", root, "rev-parse", "--verify", branch], {
-      encoding: "utf8",
-      stdio: ["ignore", "pipe", "pipe"],
-    });
-    branchGone = false;
-  } catch {
-    branchGone = true;
-  }
-  const mergeMsg = git("log", "-1", "--format=%s", "HEAD~1");
-  const mergeParents = git("rev-list", "--parents", "-n", "1", "HEAD~1").split(" ");
-  const ok =
-    status === "MERGED" &&
-    worktreeGone &&
-    mergeMsg === `orchestrator: merge ${branch}` &&
-    mergeParents.length === 3 &&
-    mergeParents[2] === branchSha;
-  console.log(
-    JSON.stringify({
-      ok,
-      status,
-      worktreeGone,
-      branchGone,
-      mergeMsg,
-      secondParent: mergeParents[2] === branchSha,
-    }),
-  );
-  if (!ok) process.exitCode = 1;
+    const status = statusOf(root, rel);
+    const worktreeGone = !existsSync(wt);
+    const branchGone = !branchExists(root, ticket.branch);
+    const mergeMsg = gitC(root, "log", "-1", "--format=%s", "HEAD~1");
+    const mergeParents = gitC(root, "rev-list", "--parents", "-n", "1", "HEAD~1").split(" ");
+    const ok =
+      status === "MERGED" &&
+      worktreeGone &&
+      mergeMsg === `orchestrator: merge ${ticket.branch}` &&
+      mergeParents.length === 3 &&
+      mergeParents[2] === branchSha;
+    console.log(
+      JSON.stringify({
+        ok,
+        status,
+        worktreeGone,
+        branchGone,
+        mergeMsg,
+        secondParent: mergeParents[2] === branchSha,
+      }),
+    );
+    if (!ok) process.exitCode = 1;
+  });
 } catch (e) {
   console.log(JSON.stringify({ ok: false, error: e instanceof Error ? e.message : String(e) }));
   process.exitCode = 1;
-} finally {
-  try {
-    execFileSync("git", ["-C", root, "worktree", "remove", "--force", wtRel], {
-      encoding: "utf8",
-      stdio: ["ignore", "pipe", "pipe"],
-    });
-  } catch {
-    /* gone */
-  }
-  rmSync(root, { recursive: true, force: true });
 }

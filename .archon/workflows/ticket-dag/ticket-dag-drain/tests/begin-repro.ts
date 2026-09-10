@@ -1,95 +1,21 @@
 #!/usr/bin/env bun
 /** Temp-Target repro: Worktree begin / resume. No Pi, no Archon engine, no repo src/. */
 import { execFileSync } from "node:child_process";
-import {
-  existsSync,
-  mkdtempSync,
-  mkdirSync,
-  readFileSync,
-  rmSync,
-  writeFileSync,
-} from "node:fs";
-import { tmpdir } from "node:os";
+import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { beginTicket } from "../scripts/begin.ts";
-import { scanTickets } from "../scripts/tickets.ts";
-
-function expect(name: string, cond: unknown, detail?: unknown): void {
-  if (!cond) {
-    throw new Error(`${name}${detail !== undefined ? `: ${JSON.stringify(detail)}` : ""}`);
-  }
-}
-
-function expectEqual(name: string, got: unknown, want: unknown): void {
-  const gs = JSON.stringify(got);
-  const ws = JSON.stringify(want);
-  if (gs !== ws) throw new Error(`${name}: got ${gs}, want ${ws}`);
-}
-
-function gitC(cwd: string, ...args: string[]): string {
-  return execFileSync("git", ["-C", cwd, ...args], { encoding: "utf8" }).trim();
-}
-
-function statusOf(root: string, rel: string): string {
-  const body = readFileSync(join(root, rel), "utf8");
-  return body.match(/^(?:\*\*)?Status\s*:(?:\*\*)?\s*(\S+)/im)?.[1] ?? "";
-}
-
-function writeTicket(
-  root: string,
-  feature: string,
-  nn: string,
-  slug: string,
-  status: string,
-  blockedBy: string,
-): string {
-  const rel = `.scratch/${feature}/issues/${nn}-${slug}.md`;
-  mkdirSync(join(root, `.scratch/${feature}/issues`), { recursive: true });
-  writeFileSync(
-    join(root, rel),
-    `# ${nn}\n\n**Blocked by:** ${blockedBy}\n\nStatus: ${status}\n`,
-  );
-  return rel;
-}
-
-function initTarget(): string {
-  const root = mkdtempSync(join(tmpdir(), "pack-begin-"));
-  gitC(root, "init", "-b", "main");
-  gitC(root, "config", "user.name", "test");
-  gitC(root, "config", "user.email", "test@example.com");
-  writeFileSync(join(root, "README.md"), "x\n");
-  gitC(root, "add", "README.md");
-  gitC(root, "commit", "-m", "init");
-  return root;
-}
-
-function commitTickets(root: string, message = "tickets"): void {
-  gitC(root, "add", ".scratch");
-  gitC(root, "commit", "-m", message);
-}
-
-function ticketOf(root: string, id: string) {
-  const t = scanTickets(root).find((x) => x.id === id);
-  if (!t) throw new Error(`missing ticket ${id}`);
-  return t;
-}
-
-async function withTarget(fn: (root: string) => Promise<void>): Promise<void> {
-  const root = initTarget();
-  try {
-    await fn(root);
-  } finally {
-    try {
-      execFileSync("git", ["-C", root, "worktree", "prune"], {
-        encoding: "utf8",
-        stdio: "ignore",
-      });
-    } catch {
-      /* ignore */
-    }
-    rmSync(root, { recursive: true, force: true });
-  }
-}
+import {
+  addTicketWorktree,
+  commitFile,
+  commitTickets,
+  expect,
+  expectEqual,
+  gitC,
+  statusOf,
+  ticketOf,
+  withTarget,
+  writeTicket,
+} from "./target.ts";
 
 try {
   await withTarget(async (root) => {
@@ -112,13 +38,8 @@ try {
     const rel = writeTicket(root, "feat", "01", "demo", "READY", "None");
     commitTickets(root);
     const ticket = ticketOf(root, "feat/01");
-    const wtRel = ticket.worktreeRel;
-    const wt = join(root, wtRel);
-    mkdirSync(join(root, "worktrees"), { recursive: true });
-    gitC(root, "worktree", "add", "-b", ticket.branch, wtRel, "HEAD");
-    writeFileSync(join(wt, "agent.txt"), "from-branch\n");
-    execFileSync("git", ["-C", wt, "add", "agent.txt"], { encoding: "utf8" });
-    execFileSync("git", ["-C", wt, "commit", "-m", "agent work"], { encoding: "utf8" });
+    const wt = addTicketWorktree(root, ticket);
+    commitFile(wt, "agent.txt", "from-branch\n", "agent work");
     const agentSha = gitC(wt, "rev-parse", "HEAD");
     writeFileSync(join(wt, "agent.txt"), "dirty-keep\n");
     writeFileSync(join(wt, "untracked.txt"), "untracked\n");
@@ -144,15 +65,10 @@ try {
     const rel = writeTicket(root, "feat", "01", "demo", "READY", "None");
     commitTickets(root);
     const ticket = ticketOf(root, "feat/01");
-    const wtRel = ticket.worktreeRel;
-    const wt = join(root, wtRel);
-    mkdirSync(join(root, "worktrees"), { recursive: true });
-    gitC(root, "worktree", "add", "-b", ticket.branch, wtRel, "HEAD");
-    writeFileSync(join(wt, "branch-only.txt"), "from-branch\n");
-    execFileSync("git", ["-C", wt, "add", "branch-only.txt"], { encoding: "utf8" });
-    execFileSync("git", ["-C", wt, "commit", "-m", "agent on branch"], { encoding: "utf8" });
+    const wt = addTicketWorktree(root, ticket);
+    commitFile(wt, "branch-only.txt", "from-branch\n", "agent on branch");
     const branchSha = gitC(root, "rev-parse", ticket.branch);
-    gitC(root, "worktree", "remove", "--force", wtRel);
+    gitC(root, "worktree", "remove", "--force", ticket.worktreeRel);
     expect("tree gone before begin", !existsSync(wt));
     writeFileSync(join(root, rel), "# 01\n\n**Blocked by:** None\n\nStatus: FAILED\n");
     gitC(root, "add", rel);
@@ -236,13 +152,8 @@ try {
     const rel = writeTicket(root, "feat", "01", "demo", "READY", "None");
     commitTickets(root);
     const ticket = ticketOf(root, "feat/01");
-    const wtRel = ticket.worktreeRel;
-    const wt = join(root, wtRel);
-    mkdirSync(join(root, "worktrees"), { recursive: true });
-    gitC(root, "worktree", "add", "-b", ticket.branch, wtRel, "HEAD");
-    writeFileSync(join(wt, "conflict.txt"), "from-agent\n");
-    execFileSync("git", ["-C", wt, "add", "conflict.txt"], { encoding: "utf8" });
-    execFileSync("git", ["-C", wt, "commit", "-m", "agent conflict"], { encoding: "utf8" });
+    const wt = addTicketWorktree(root, ticket);
+    commitFile(wt, "conflict.txt", "from-agent\n", "agent conflict");
     writeFileSync(join(wt, "untracked.txt"), "keep\n");
     writeFileSync(join(root, rel), "# 01\n\n**Blocked by:** None\n\nStatus: FAILED\n");
     gitC(root, "add", rel);

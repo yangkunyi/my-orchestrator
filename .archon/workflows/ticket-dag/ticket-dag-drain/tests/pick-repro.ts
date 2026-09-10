@@ -1,73 +1,22 @@
 #!/usr/bin/env bun
 /** Temp-Target repro: startable pick. No Pi, no Archon engine, no repo src/. */
-import { execFileSync } from "node:child_process";
-import {
-  existsSync,
-  mkdtempSync,
-  mkdirSync,
-  readdirSync,
-  readFileSync,
-  rmSync,
-  writeFileSync,
-} from "node:fs";
-import { tmpdir } from "node:os";
+import { existsSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { rematchLeftovers } from "../scripts/rematch.ts";
 import { pickStartable } from "../scripts/pick.ts";
-
-function expect(name: string, cond: unknown, detail?: unknown): void {
-  if (!cond) {
-    throw new Error(`${name}${detail !== undefined ? `: ${JSON.stringify(detail)}` : ""}`);
-  }
-}
-
-function expectEqual(name: string, got: unknown, want: unknown): void {
-  const gs = JSON.stringify(got);
-  const ws = JSON.stringify(want);
-  if (gs !== ws) throw new Error(`${name}: got ${gs}, want ${ws}`);
-}
-
-function gitC(cwd: string, ...args: string[]): string {
-  return execFileSync("git", ["-C", cwd, ...args], { encoding: "utf8" }).trim();
-}
-
-function statusOf(root: string, rel: string): string {
-  const body = readFileSync(join(root, rel), "utf8");
-  return body.match(/^(?:\*\*)?Status\s*:(?:\*\*)?\s*(\S+)/im)?.[1] ?? "";
-}
-
-function writeTicket(
-  root: string,
-  feature: string,
-  nn: string,
-  slug: string,
-  status: string,
-  blockedBy: string,
-): string {
-  const rel = `.scratch/${feature}/issues/${nn}-${slug}.md`;
-  mkdirSync(join(root, `.scratch/${feature}/issues`), { recursive: true });
-  writeFileSync(
-    join(root, rel),
-    `# ${nn}\n\n**Blocked by:** ${blockedBy}\n\nStatus: ${status}\n`,
-  );
-  return rel;
-}
-
-function initTarget(): string {
-  const root = mkdtempSync(join(tmpdir(), "pack-pick-"));
-  gitC(root, "init", "-b", "main");
-  gitC(root, "config", "user.name", "test");
-  gitC(root, "config", "user.email", "test@example.com");
-  writeFileSync(join(root, "README.md"), "x\n");
-  gitC(root, "add", "README.md");
-  gitC(root, "commit", "-m", "init");
-  return root;
-}
-
-function commitTickets(root: string, message = "tickets"): void {
-  gitC(root, "add", ".scratch");
-  gitC(root, "commit", "-m", message);
-}
+import {
+  addTicketWorktree,
+  commitFile,
+  commitTickets,
+  expect,
+  expectEqual,
+  gitC,
+  mkTemp,
+  statusOf,
+  ticketOf,
+  withTarget,
+  writeTicket,
+} from "./target.ts";
 
 function ids(picked: { id: string }[]): string[] {
   return picked.map((t) => t.id).sort();
@@ -82,24 +31,6 @@ function listNonDot(dir: string): string[] {
       return join(parent, e.name).slice(dir.length).replace(/^\//, "");
     })
     .sort();
-}
-
-async function withTarget(fn: (root: string, artifacts: string, state: string) => Promise<void>): Promise<void> {
-  const root = initTarget();
-  const artifacts = mkdtempSync(join(tmpdir(), "pack-pick-art-"));
-  const state = mkdtempSync(join(tmpdir(), "pack-pick-state-"));
-  try {
-    await fn(root, artifacts, state);
-  } finally {
-    try {
-      execFileSync("git", ["-C", root, "worktree", "prune"], { encoding: "utf8", stdio: "ignore" });
-    } catch {
-      /* ignore */
-    }
-    rmSync(root, { recursive: true, force: true });
-    rmSync(artifacts, { recursive: true, force: true });
-    rmSync(state, { recursive: true, force: true });
-  }
 }
 
 try {
@@ -167,8 +98,8 @@ try {
   await withTarget(async (root) => {
     writeTicket(root, "feat", "01", "one", "FAILED", "None");
     commitTickets(root);
-    const drain1 = mkdtempSync(join(tmpdir(), "pack-pick-d1-"));
-    const drain2 = mkdtempSync(join(tmpdir(), "pack-pick-d2-"));
+    const drain1 = mkTemp("pack-pick-d1-");
+    const drain2 = mkTemp("pack-pick-d2-");
     try {
       const a = await pickStartable(root, { concurrency: 4, artifactsDir: drain1 });
       expectEqual("drain1 picks FAILED", ids(a), ["feat/01"]);
@@ -183,14 +114,10 @@ try {
   await withTarget(async (root, artifacts) => {
     const rel = writeTicket(root, "feat", "01", "demo", "READY", "None");
     commitTickets(root);
-    const branch = "ticket/feat/01-demo";
-    const wtRel = "worktrees/feat-01-demo";
-    mkdirSync(join(root, "worktrees"), { recursive: true });
-    gitC(root, "worktree", "add", "-b", branch, wtRel, "HEAD");
-    writeFileSync(join(root, wtRel, "work.txt"), "agent\n");
-    execFileSync("git", ["-C", join(root, wtRel), "add", "work.txt"], { encoding: "utf8" });
-    execFileSync("git", ["-C", join(root, wtRel), "commit", "-m", "agent work"], { encoding: "utf8" });
-    gitC(root, "merge", "--no-ff", "-m", `orchestrator: merge ${branch}`, branch);
+    const ticket = ticketOf(root, "feat/01");
+    const wt = addTicketWorktree(root, ticket);
+    commitFile(wt, "work.txt", "agent\n", "agent work");
+    gitC(root, "merge", "--no-ff", "-m", `orchestrator: merge ${ticket.branch}`, ticket.branch);
     const picked = await pickStartable(root, { concurrency: 4, artifactsDir: artifacts });
     expectEqual("merge commit: not startable", ids(picked), []);
     expectEqual("READY with merge commit stays READY", statusOf(root, rel), "READY");
@@ -212,13 +139,10 @@ try {
   await withTarget(async (root, artifacts) => {
     const rel = writeTicket(root, "feat", "01", "demo", "READY", "None");
     commitTickets(root, "ticket");
-    writeFileSync(join(root, rel), "# 01\n\n**Blocked by:** None\n\nStatus: RUNNING\n");
-    gitC(root, "add", rel);
-    gitC(root, "commit", "-m", "orchestrator: feat/01 Status RUNNING");
-    const branch = "ticket/feat/01-demo";
-    const wtRel = "worktrees/feat-01-demo";
-    mkdirSync(join(root, "worktrees"), { recursive: true });
-    gitC(root, "worktree", "add", "-b", branch, wtRel, "HEAD");
+    writeTicket(root, "feat", "01", "demo", "RUNNING", "None");
+    commitTickets(root, "orchestrator: feat/01 Status RUNNING");
+    const ticket = ticketOf(root, "feat/01");
+    addTicketWorktree(root, ticket);
     await rematchLeftovers(root, artifacts);
     expectEqual("rematch leftover → FAILED", statusOf(root, rel), "FAILED");
     const picked = await pickStartable(root, { concurrency: 4, artifactsDir: artifacts });

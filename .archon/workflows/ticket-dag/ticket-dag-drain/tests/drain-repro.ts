@@ -1,15 +1,6 @@
 #!/usr/bin/env bun
 /** Temp-Target repro: drain loop without Pi. Empty ticket branch FAILED-exits 0 so pick can empty. No Archon engine, no repo src/. */
-import { execFileSync, spawnSync } from "node:child_process";
-import {
-  existsSync,
-  mkdtempSync,
-  mkdirSync,
-  readFileSync,
-  rmSync,
-  writeFileSync,
-} from "node:fs";
-import { tmpdir } from "node:os";
+import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { noopAgent } from "../scripts/agent.ts";
 import { rematchLeftovers } from "../scripts/rematch.ts";
@@ -17,70 +8,23 @@ import { REVIEW_BASE_REL } from "../scripts/review.ts";
 import { pickStartable } from "../scripts/pick.ts";
 import { conflictTicket } from "../scripts/conflict.ts";
 import { implementTicket } from "../scripts/implement.ts";
-import { scanTickets } from "../scripts/tickets.ts";
+import {
+  addTicketWorktree,
+  commitFile,
+  commitTickets,
+  envWithout,
+  expect,
+  expectEqual,
+  gitC,
+  runScript,
+  statusOf,
+  ticketOf,
+  withTarget,
+  writeTicket,
+} from "./target.ts";
 
 const implementScript = join(import.meta.dir, "../../ticket-dag-execute/scripts/implement.ts");
 const conflictScript = join(import.meta.dir, "../../ticket-dag-execute/scripts/conflict.ts");
-
-function expect(name: string, cond: unknown, detail?: unknown): void {
-  if (!cond) {
-    throw new Error(`${name}${detail !== undefined ? `: ${JSON.stringify(detail)}` : ""}`);
-  }
-}
-
-function expectEqual(name: string, got: unknown, want: unknown): void {
-  const gs = JSON.stringify(got);
-  const ws = JSON.stringify(want);
-  if (gs !== ws) throw new Error(`${name}: got ${gs}, want ${ws}`);
-}
-
-function gitC(cwd: string, ...args: string[]): string {
-  return execFileSync("git", ["-C", cwd, ...args], { encoding: "utf8" }).trim();
-}
-
-function statusOf(root: string, rel: string): string {
-  const body = readFileSync(join(root, rel), "utf8");
-  return body.match(/^(?:\*\*)?Status\s*:(?:\*\*)?\s*(\S+)/im)?.[1] ?? "";
-}
-
-function writeTicket(
-  root: string,
-  feature: string,
-  nn: string,
-  slug: string,
-  status: string,
-  blockedBy: string,
-): string {
-  const rel = `.scratch/${feature}/issues/${nn}-${slug}.md`;
-  mkdirSync(join(root, `.scratch/${feature}/issues`), { recursive: true });
-  writeFileSync(
-    join(root, rel),
-    `# ${nn}\n\n**Blocked by:** ${blockedBy}\n\nStatus: ${status}\n`,
-  );
-  return rel;
-}
-
-function initTarget(): string {
-  const root = mkdtempSync(join(tmpdir(), "pack-drain-"));
-  gitC(root, "init", "-b", "main");
-  gitC(root, "config", "user.name", "test");
-  gitC(root, "config", "user.email", "test@example.com");
-  writeFileSync(join(root, "README.md"), "x\n");
-  gitC(root, "add", "README.md");
-  gitC(root, "commit", "-m", "init");
-  return root;
-}
-
-function commitTickets(root: string, message = "tickets"): void {
-  gitC(root, "add", ".scratch");
-  gitC(root, "commit", "-m", message);
-}
-
-function ticketOf(root: string, id: string) {
-  const t = scanTickets(root).find((x) => x.id === id);
-  if (!t) throw new Error(`missing ticket ${id}`);
-  return t;
-}
 
 function agentOpts(artifacts: string) {
   return { artifactsDir: artifacts, runAgent: noopAgent };
@@ -109,27 +53,6 @@ async function drainUntilEmpty(
   return { iterations, tokens };
 }
 
-async function withTarget(
-  fn: (root: string, artifacts: string) => Promise<void>,
-): Promise<void> {
-  const root = initTarget();
-  const artifacts = mkdtempSync(join(tmpdir(), "pack-drain-art-"));
-  try {
-    await fn(root, artifacts);
-  } finally {
-    try {
-      execFileSync("git", ["-C", root, "worktree", "prune"], {
-        encoding: "utf8",
-        stdio: "ignore",
-      });
-    } catch {
-      /* ignore */
-    }
-    rmSync(root, { recursive: true, force: true });
-    rmSync(artifacts, { recursive: true, force: true });
-  }
-}
-
 try {
   await withTarget(async (root, artifacts) => {
     const rel = writeTicket(root, "feat", "01", "demo", "READY", "None");
@@ -144,40 +67,25 @@ try {
   await withTarget(async (root) => {
     writeTicket(root, "feat", "01", "demo", "READY", "None");
     commitTickets(root);
-    const { INPUTS_TICKET: _drop, ...env } = process.env;
-    const proc = spawnSync(process.execPath, [implementScript], {
-      cwd: root,
-      encoding: "utf8",
-      env: { ...env, NODE_USE_ENV_PROXY: "1" },
-    });
+    const proc = runScript(implementScript, root, envWithout("INPUTS_TICKET"));
     expect("bare implement without ticket is unsupported", (proc.status ?? 1) !== 0, proc.status);
-    expect("error names missing ticket", (proc.stderr ?? "").includes("INPUTS_TICKET is required"));
+    expect("error names missing ticket", proc.stderr.includes("INPUTS_TICKET is required"));
   });
 
   await withTarget(async (root) => {
     writeTicket(root, "feat", "01", "demo", "READY", "None");
     commitTickets(root);
-    const { INPUTS_TICKET: _drop, ...env } = process.env;
-    const proc = spawnSync(process.execPath, [conflictScript], {
-      cwd: root,
-      encoding: "utf8",
-      env: { ...env, NODE_USE_ENV_PROXY: "1" },
-    });
+    const proc = runScript(conflictScript, root, envWithout("INPUTS_TICKET"));
     expect("bare conflict without ticket is unsupported", (proc.status ?? 1) !== 0, proc.status);
-    expect("conflict error names missing ticket", (proc.stderr ?? "").includes("INPUTS_TICKET is required"));
+    expect("conflict error names missing ticket", proc.stderr.includes("INPUTS_TICKET is required"));
   });
 
   await withTarget(async (root) => {
     writeTicket(root, "feat", "01", "demo", "READY", "None");
     commitTickets(root);
-    const { ARTIFACTS_DIR: _drop, ...env } = process.env;
-    const proc = spawnSync(process.execPath, [implementScript], {
-      cwd: root,
-      encoding: "utf8",
-      env: { ...env, INPUTS_TICKET: "feat/01", NODE_USE_ENV_PROXY: "1" },
-    });
+    const proc = runScript(implementScript, root, { ...envWithout("ARTIFACTS_DIR"), INPUTS_TICKET: "feat/01" });
     expect("implement requires artifacts dir", (proc.status ?? 1) !== 0, proc.status);
-    expect("error names missing artifacts", (proc.stderr ?? "").includes("ARTIFACTS_DIR is required"));
+    expect("error names missing artifacts", proc.stderr.includes("ARTIFACTS_DIR is required"));
   });
 
   await withTarget(async (root, artifacts) => {
@@ -217,13 +125,8 @@ try {
     const rel = writeTicket(root, "feat", "01", "demo", "READY", "None");
     commitTickets(root);
     const ticket = ticketOf(root, "feat/01");
-    const wtRel = ticket.worktreeRel;
-    const wt = join(root, wtRel);
-    mkdirSync(join(root, "worktrees"), { recursive: true });
-    gitC(root, "worktree", "add", "-b", ticket.branch, wtRel, "HEAD");
-    writeFileSync(join(wt, "conflict.txt"), "from-agent\n");
-    execFileSync("git", ["-C", wt, "add", "conflict.txt"], { encoding: "utf8" });
-    execFileSync("git", ["-C", wt, "commit", "-m", "agent conflict"], { encoding: "utf8" });
+    const wt = addTicketWorktree(root, ticket);
+    commitFile(wt, "conflict.txt", "from-agent\n", "agent conflict");
     writeFileSync(join(root, rel), "# 01\n\n**Blocked by:** None\n\nStatus: FAILED\n");
     gitC(root, "add", rel);
     gitC(root, "commit", "-m", "orchestrator: feat/01 Status FAILED");

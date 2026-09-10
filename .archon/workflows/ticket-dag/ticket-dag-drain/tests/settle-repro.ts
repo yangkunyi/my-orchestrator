@@ -1,147 +1,35 @@
 #!/usr/bin/env bun
 /** Temp-Target repro: settle after agent. Matches empty-merge and merge-conflict CLI repros. No Pi, no Archon engine, no repo src/. */
-import { execFileSync, spawnSync } from "node:child_process";
-import {
-  existsSync,
-  mkdtempSync,
-  mkdirSync,
-  readFileSync,
-  rmSync,
-  writeFileSync,
-} from "node:fs";
-import { tmpdir } from "node:os";
+import { existsSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { beginTicket } from "../scripts/begin.ts";
 import { tryMerge } from "../scripts/git.ts";
 import { settleAfterAgent } from "../scripts/settle.ts";
-import { scanTickets } from "../scripts/tickets.ts";
+import {
+  branchExists,
+  commitsAhead,
+  commitFile,
+  commitTickets,
+  expect,
+  expectEqual,
+  gitC,
+  hasMergeHead,
+  runScript,
+  sleep,
+  statusOf,
+  subjects,
+  ticketOf,
+  withTarget,
+  writeTicket,
+} from "./target.ts";
 
 const settleScript = join(import.meta.dir, "../scripts/settle.ts");
-
-function expect(name: string, cond: unknown, detail?: unknown): void {
-  if (!cond) {
-    throw new Error(`${name}${detail !== undefined ? `: ${JSON.stringify(detail)}` : ""}`);
-  }
-}
-
-function expectEqual(name: string, got: unknown, want: unknown): void {
-  const gs = JSON.stringify(got);
-  const ws = JSON.stringify(want);
-  if (gs !== ws) throw new Error(`${name}: got ${gs}, want ${ws}`);
-}
-
-function gitC(cwd: string, ...args: string[]): string {
-  return execFileSync("git", ["-C", cwd, ...args], { encoding: "utf8" }).trim();
-}
-
-function statusOf(root: string, rel: string): string {
-  const body = readFileSync(join(root, rel), "utf8");
-  return body.match(/^(?:\*\*)?Status\s*:(?:\*\*)?\s*(\S+)/im)?.[1] ?? "";
-}
-
-function writeTicket(
-  root: string,
-  feature: string,
-  nn: string,
-  slug: string,
-  status: string,
-  blockedBy: string,
-): string {
-  const rel = `.scratch/${feature}/issues/${nn}-${slug}.md`;
-  mkdirSync(join(root, `.scratch/${feature}/issues`), { recursive: true });
-  writeFileSync(
-    join(root, rel),
-    `# ${nn}\n\n**Blocked by:** ${blockedBy}\n\nStatus: ${status}\n`,
-  );
-  return rel;
-}
-
-function initTarget(): string {
-  const root = mkdtempSync(join(tmpdir(), "pack-settle-"));
-  gitC(root, "init", "-b", "main");
-  gitC(root, "config", "user.name", "test");
-  gitC(root, "config", "user.email", "test@example.com");
-  writeFileSync(join(root, "README.md"), "x\n");
-  gitC(root, "add", "README.md");
-  gitC(root, "commit", "-m", "init");
-  return root;
-}
-
-function commitTickets(root: string, message = "tickets"): void {
-  gitC(root, "add", ".scratch");
-  gitC(root, "commit", "-m", message);
-}
-
-function ticketOf(root: string, id: string) {
-  const t = scanTickets(root).find((x) => x.id === id);
-  if (!t) throw new Error(`missing ticket ${id}`);
-  return t;
-}
-
-function commitsAhead(worktree: string, base: string): number {
-  return Number(gitC(worktree, "rev-list", "--count", `${base}..HEAD`));
-}
-
-function subjects(root: string): string[] {
-  const out = gitC(root, "log", "--pretty=%s");
-  return out ? out.split("\n") : [];
-}
-
-function hasMergeHead(cwd: string): boolean {
-  try {
-    gitC(cwd, "rev-parse", "-q", "--verify", "MERGE_HEAD");
-    return true;
-  } catch {
-    return false;
-  }
-}
-
-function branchExists(root: string, branch: string): boolean {
-  try {
-    gitC(root, "rev-parse", "--verify", branch);
-    return true;
-  } catch {
-    return false;
-  }
-}
-
-function commitOnTree(wt: string, file: string, content: string, message: string): void {
-  writeFileSync(join(wt, file), content);
-  execFileSync("git", ["-C", wt, "add", file], { encoding: "utf8" });
-  execFileSync("git", ["-C", wt, "commit", "-m", message], { encoding: "utf8" });
-}
 
 function runSettleScript(
   root: string,
   ticketId: string,
 ): { stdout: string; stderr: string; status: number | null } {
-  const r = spawnSync(process.execPath, [settleScript], {
-    cwd: root,
-    encoding: "utf8",
-    env: { ...process.env, INPUTS_TICKET: ticketId },
-  });
-  return { stdout: r.stdout ?? "", stderr: r.stderr ?? "", status: r.status };
-}
-
-function sleep(ms: number): Promise<void> {
-  return new Promise((r) => setTimeout(r, ms));
-}
-
-async function withTarget(fn: (root: string) => Promise<void>): Promise<void> {
-  const root = initTarget();
-  try {
-    await fn(root);
-  } finally {
-    try {
-      execFileSync("git", ["-C", root, "worktree", "prune"], {
-        encoding: "utf8",
-        stdio: "ignore",
-      });
-    } catch {
-      /* ignore */
-    }
-    rmSync(root, { recursive: true, force: true });
-  }
+  return runScript(settleScript, root, { INPUTS_TICKET: ticketId });
 }
 
 try {
@@ -171,7 +59,7 @@ try {
     const ticket = ticketOf(root, "feat/01");
     const begun = await beginTicket(root, ticket);
     const wt = begun.worktree;
-    commitOnTree(wt, "work.txt", "agent\n", "agent work");
+    commitFile(wt, "work.txt", "agent\n", "agent work");
     writeFileSync(join(wt, "work.txt"), "dirty\n");
     writeFileSync(join(wt, "untracked.txt"), "u\n");
     const result = await settleAfterAgent(root, ticket, wt);
@@ -190,7 +78,7 @@ try {
     const ticket = ticketOf(root, "feat/01");
     const begun = await beginTicket(root, ticket);
     const wt = begun.worktree;
-    commitOnTree(wt, "work.txt", "agent\n", "agent work");
+    commitFile(wt, "work.txt", "agent\n", "agent work");
     const branchSha = gitC(root, "rev-parse", ticket.branch);
     const result = await settleAfterAgent(root, ticket, wt);
     expectEqual("success result", result, "merged");
@@ -233,7 +121,7 @@ try {
     const ticket = ticketOf(root, "feat/01");
     const begun = await beginTicket(root, ticket);
     const wt = begun.worktree;
-    commitOnTree(wt, "f", "b\n", "ticket");
+    commitFile(wt, "f", "b\n", "ticket");
     writeFileSync(join(root, "f"), "c\n");
     gitC(root, "add", "f");
     gitC(root, "commit", "-m", "mainline");
@@ -263,7 +151,7 @@ try {
     commitTickets(root);
     const ticket = ticketOf(root, "feat/01");
     const begun = await beginTicket(root, ticket);
-    commitOnTree(begun.worktree, "work.txt", "agent\n", "agent work");
+    commitFile(begun.worktree, "work.txt", "agent\n", "agent work");
     const proc = runSettleScript(root, "feat/01");
     expectEqual("merged stdout token", proc.stdout, "merged\n");
     expectEqual("merged exit 0", proc.status, 0);
@@ -277,7 +165,7 @@ try {
     commitTickets(root);
     const ticket = ticketOf(root, "feat/01");
     const begun = await beginTicket(root, ticket);
-    commitOnTree(begun.worktree, "f", "b\n", "ticket");
+    commitFile(begun.worktree, "f", "b\n", "ticket");
     writeFileSync(join(root, "f"), "c\n");
     gitC(root, "add", "f");
     gitC(root, "commit", "-m", "mainline");
@@ -291,7 +179,7 @@ try {
     commitTickets(root);
     const ticket = ticketOf(root, "feat/01");
     const begun = await beginTicket(root, ticket);
-    commitOnTree(begun.worktree, "work.txt", "agent\n", "agent work");
+    commitFile(begun.worktree, "work.txt", "agent\n", "agent work");
     writeFileSync(join(root, ".git.lock"), "cli-lock\n");
     const result = await settleAfterAgent(root, ticket, begun.worktree);
     expectEqual("CLI lock file is not the pack lock", result, "merged");
@@ -303,7 +191,7 @@ try {
     commitTickets(root);
     const ticket = ticketOf(root, "feat/01");
     const begun = await beginTicket(root, ticket);
-    commitOnTree(begun.worktree, "work.txt", "agent\n", "agent work");
+    commitFile(begun.worktree, "work.txt", "agent\n", "agent work");
     const lockPath = join(root, ".git", "ticket-dag.lock");
     writeFileSync(lockPath, `${process.pid}\n`);
     let finished = false;
@@ -326,8 +214,8 @@ try {
     const t2 = ticketOf(root, "feat/02");
     const b1 = await beginTicket(root, t1);
     const b2 = await beginTicket(root, ticketOf(root, "feat/02"));
-    commitOnTree(b1.worktree, "one.txt", "1\n", "one");
-    commitOnTree(b2.worktree, "two.txt", "2\n", "two");
+    commitFile(b1.worktree, "one.txt", "1\n", "one");
+    commitFile(b2.worktree, "two.txt", "2\n", "two");
     const [r1, r2] = await Promise.all([
       settleAfterAgent(root, t1, b1.worktree),
       settleAfterAgent(root, t2, b2.worktree),

@@ -1,29 +1,12 @@
 #!/usr/bin/env bun
 /** Temp-Target repro: pack config loader. No Pi, no Archon engine, no repo src/. */
-import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { loadConfig } from "../scripts/config.ts";
+import { expectEqual, expectThrow, mkTemp } from "./target.ts";
 
-const root = mkdtempSync(join(tmpdir(), "pack-config-"));
+const root = mkTemp("pack-config-");
 mkdirSync(join(root, ".scratch"), { recursive: true });
-
-function expectEqual(name: string, got: unknown, want: unknown): void {
-  const gs = JSON.stringify(got);
-  const ws = JSON.stringify(want);
-  if (gs !== ws) throw new Error(`${name}: got ${gs}, want ${ws}`);
-}
-
-function expectThrow(name: string, fn: () => unknown, re: RegExp): void {
-  try {
-    fn();
-  } catch (e) {
-    const msg = e instanceof Error ? e.message : String(e);
-    if (!re.test(msg)) throw new Error(`${name}: threw ${JSON.stringify(msg)}`);
-    return;
-  }
-  throw new Error(`${name}: expected throw`);
-}
 
 try {
   expectEqual("missing file", loadConfig(root), {

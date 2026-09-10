@@ -1,9 +1,7 @@
 #!/usr/bin/env bun
 /** Temp-Target repro: drain-end review node. Fake agent, no live Pi, no Archon engine, no repo src/. */
-import { execFileSync, spawnSync } from "node:child_process";
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
-import { tmpdir } from "node:os";
 import {
   ticketSessionFile,
   type AgentRunner,
@@ -18,48 +16,16 @@ import {
   reviewDrain,
   writeReviewBase,
 } from "../scripts/review.ts";
+import {
+  envWithout,
+  expect,
+  expectEqual,
+  gitC,
+  runScript,
+  withTarget,
+} from "./target.ts";
 
 const reviewScript = join(import.meta.dir, "../scripts/review.ts");
-
-function expect(name: string, cond: unknown, detail?: unknown): void {
-  if (!cond) {
-    throw new Error(`${name}${detail !== undefined ? `: ${JSON.stringify(detail)}` : ""}`);
-  }
-}
-
-function expectEqual(name: string, got: unknown, want: unknown): void {
-  const gs = JSON.stringify(got);
-  const ws = JSON.stringify(want);
-  if (gs !== ws) throw new Error(`${name}: got ${gs}, want ${ws}`);
-}
-
-function gitC(cwd: string, ...args: string[]): string {
-  return execFileSync("git", ["-C", cwd, ...args], { encoding: "utf8" }).trim();
-}
-
-function initTarget(): string {
-  const root = mkdtempSync(join(tmpdir(), "pack-review-"));
-  gitC(root, "init", "-b", "main");
-  gitC(root, "config", "user.name", "test");
-  gitC(root, "config", "user.email", "test@example.com");
-  writeFileSync(join(root, "README.md"), "x\n");
-  gitC(root, "add", "README.md");
-  gitC(root, "commit", "-m", "init");
-  return root;
-}
-
-async function withTarget(
-  fn: (root: string, artifacts: string) => Promise<void>,
-): Promise<void> {
-  const root = initTarget();
-  const artifacts = mkdtempSync(join(tmpdir(), "pack-review-art-"));
-  try {
-    await fn(root, artifacts);
-  } finally {
-    rmSync(root, { recursive: true, force: true });
-    rmSync(artifacts, { recursive: true, force: true });
-  }
-}
 
 function readOut(artifacts: string): string {
   return readFileSync(join(artifacts, REVIEW_MD_REL), "utf8");
@@ -196,24 +162,14 @@ try {
   });
 
   await withTarget(async (root) => {
-    const { ARTIFACTS_DIR: _drop, ...env } = process.env;
-    const proc = spawnSync(process.execPath, [reviewScript], {
-      cwd: root,
-      encoding: "utf8",
-      env: { ...env, NODE_USE_ENV_PROXY: "1" },
-    });
+    const proc = runScript(reviewScript, root, envWithout("ARTIFACTS_DIR"));
     expect("bare review without artifacts fails", (proc.status ?? 1) !== 0, proc.status);
-    expect("error names missing artifacts", (proc.stderr ?? "").includes("ARTIFACTS_DIR is required"));
+    expect("error names missing artifacts", proc.stderr.includes("ARTIFACTS_DIR is required"));
   });
 
   await withTarget(async (root, artifacts) => {
     await writeReviewBase(root, artifacts);
-    const { ARTIFACTS_DIR: _drop, ...env } = process.env;
-    const proc = spawnSync(process.execPath, [reviewScript], {
-      cwd: root,
-      encoding: "utf8",
-      env: { ...env, ARTIFACTS_DIR: artifacts, NODE_USE_ENV_PROXY: "1" },
-    });
+    const proc = runScript(reviewScript, root, { ARTIFACTS_DIR: artifacts });
     expectEqual("empty-diff CLI exit 0", proc.status ?? 1, 0);
     const body = readOut(artifacts);
     expect("empty-diff CLI skips session", body.includes("empty diff") && body.includes("skipped"));
