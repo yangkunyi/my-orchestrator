@@ -4,7 +4,7 @@
 
 **Blocked by:** 01
 
-**Status:** BLOCKED
+Status: READY
 
 - [ ] BLOCKED with all blockers MERGED is stamped READY before pick
 - [ ] startable is READY or FAILED, blockers MERGED, no merge commit, not attempted this drain
