@@ -120,7 +120,7 @@ export type PersonaArgs = {
   summary: { base: string };
 };
 
-/** The roles with no further input take no argument; implement's skill may be left to the default. */
+/** The roles with no further input take no argument; implement's skill may be omitted for the fallback. */
 type PersonaRest<R extends AgentRole> = R extends "implement"
   ? [args?: PersonaArgs["implement"]]
   : PersonaArgs[R] extends undefined
@@ -129,8 +129,9 @@ type PersonaRest<R extends AgentRole> = R extends "implement"
 
 /**
  * The persona a role runs under: the skill of a ticket node, or the contract of a drain-end reader
- * built from the range it is handed. The dsh skill is the caller's to supply; omitting it reads the
- * machine's pi skill tree, the one default this pack assumes.
+ * built from the range it is handed. The dsh skill is the caller's to supply; a node that supplies
+ * none runs the inlined fallback, so this builder never reads the machine's tree itself - the role
+ * table reads it once and hands it in.
  */
 export function personaFor<R extends AgentRole>(
   role: R,
@@ -143,7 +144,7 @@ export function personaFor<R extends AgentRole>(
     case "implement": {
       if (runner !== "dsh") return IMPLEMENT_SKILL;
       const own = args[0] as PersonaArgs["implement"] | undefined;
-      return `${IMPLEMENT_SKILL}\n\n${tddPersona(own === undefined ? readTddSkill() : own.skill)}`;
+      return `${IMPLEMENT_SKILL}\n\n${tddPersona(own?.skill)}`;
     }
     case "review": {
       const own = args[0] as PersonaArgs["review"];

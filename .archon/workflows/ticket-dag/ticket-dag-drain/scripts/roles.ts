@@ -1,6 +1,6 @@
 import { AGENT_WALL_MS, type AgentRole, type PackAgentOpts } from "./agent.ts";
 import type { PackConfig, Runner } from "./config.ts";
-import { personaFor } from "./prompt.ts";
+import { personaFor, readTddSkill } from "./prompt.ts";
 import { roleSessionFile } from "./session-log.ts";
 
 /** The drain-end readers share one clock: review and summary read the same range and report on it. */
@@ -38,7 +38,9 @@ type RoleSpec<A> = {
 export const ROLES: { [K in AgentRole]: RoleSpec<RoleShape[K]> } = {
   implement: {
     sessionKey: (args) => args.ticketId,
-    persona: (runner) => personaFor("implement", runner),
+    // The one ambient fact an implement node rests on lives here: the table reads the tdd tree its
+    // machine carries - once, where the role's persona is composed - and hands it to the builder.
+    persona: (runner) => personaFor("implement", runner, { skill: readTddSkill() }),
     tools: undefined,
     useBash: undefined,
     wallMs: AGENT_WALL_MS,

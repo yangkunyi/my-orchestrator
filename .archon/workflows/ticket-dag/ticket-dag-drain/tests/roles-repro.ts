@@ -8,12 +8,12 @@ import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { AGENT_WALL_MS, type AgentRole } from "../scripts/agent.ts";
 import type { PackConfig } from "../scripts/config.ts";
-import { personaFor, REVIEW_AXES, reviewPersona, summaryPersona } from "../scripts/prompt.ts";
+import { personaFor, readTddSkill, REVIEW_AXES, reviewPersona, summaryPersona } from "../scripts/prompt.ts";
 import { REVIEW_TOOLS, REVIEW_WALL_MS, ROLES, roleAgent } from "../scripts/roles.ts";
 import { roleSessionFile } from "../scripts/session-log.ts";
 import { expect, expectEqual } from "./target.ts";
 
-// The table builds strings and opts; no cwd or artifacts dir is ever touched.
+// The table builds strings and opts; its only filesystem touch is the tdd tree an implement node runs under.
 const ARTIFACTS = "/artifacts";
 const CWD = "/worktree";
 const CONFIG: PackConfig = { model: "highland/deepseek-v4-flash", thinkingLevel: "high", concurrency: 4, runner: "pi" };
@@ -45,7 +45,7 @@ try {
   expectEqual("implement takes the runner's default tools", impl.opts.tools, undefined);
   expectEqual("implement takes the runner's default bash", impl.opts.useBash, undefined);
   expectEqual("implement wall clock is the ticket clock", impl.opts.wallMs, AGENT_WALL_MS);
-  expectEqual("implement persona is the skill", impl.opts.persona, personaFor("implement", "pi"));
+  expectEqual("implement persona is the skill", impl.opts.persona, personaFor("implement", "pi", { skill: undefined }));
 
   const dshImplement = roleAgent({
     role: "implement",
@@ -55,7 +55,18 @@ try {
     config: { ...CONFIG, runner: "dsh" },
     prompt: TASK,
   });
-  expectEqual("the runner reaches the persona", dshImplement.opts.persona, personaFor("implement", "dsh"));
+  // The table reads the tree the machine carries, so on a machine that has one the persona must be
+  // the tree's and not the inlined fallback. A table that quietly passed nothing would fall back here.
+  const tree = readTddSkill();
+  expect(
+    "the table's dsh persona is the tree's, not the inlined fallback",
+    tree === undefined || (dshImplement.opts.persona ?? "").includes("The tdd skill, in full, from "),
+  );
+  expectEqual(
+    "the runner reaches the persona",
+    dshImplement.opts.persona,
+    personaFor("implement", "dsh", { skill: readTddSkill() }),
+  );
   expect("dsh implement persona carries the tdd body", (dshImplement.opts.persona ?? "").includes("Red before green."));
 
   const conflict = roleAgent({
