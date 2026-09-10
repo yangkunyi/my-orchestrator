@@ -1,26 +1,32 @@
+import { execFile as execFileCb } from "node:child_process";
+import { promisify } from "node:util";
 import { AsyncLocalStorage } from "node:async_hooks";
 import { mkdirSync, appendFileSync, readFileSync, existsSync } from "node:fs";
 import { join } from "node:path";
 import lockfile from "proper-lockfile";
-import { simpleGit } from "simple-git";
 import type { Ticket } from "./tickets.js";
 
+const execFile = promisify(execFileCb);
 const lockHeld = new AsyncLocalStorage<true>();
-
-function gitClient(cwd: string) {
-  return simpleGit({ baseDir: cwd });
-}
 
 async function git(
   cwd: string,
   args: string[],
 ): Promise<{ ok: boolean; stdout: string; stderr: string }> {
   try {
-    const stdout = await gitClient(cwd).raw(args);
-    return { ok: true, stdout: (stdout ?? "").trim(), stderr: "" };
+    const { stdout, stderr } = await execFile("git", args, {
+      cwd,
+      encoding: "utf8",
+      maxBuffer: 10 * 1024 * 1024,
+    });
+    return { ok: true, stdout: (stdout ?? "").trim(), stderr: (stderr ?? "").trim() };
   } catch (e) {
-    const msg = e instanceof Error ? e.message : String(e);
-    return { ok: false, stdout: "", stderr: msg };
+    const err = e as { stdout?: string; stderr?: string; message?: string };
+    return {
+      ok: false,
+      stdout: (err.stdout ?? "").trim(),
+      stderr: (err.stderr ?? err.message ?? "").trim(),
+    };
   }
 }
 
