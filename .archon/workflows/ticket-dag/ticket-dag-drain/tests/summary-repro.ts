@@ -4,7 +4,7 @@ import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { type AgentRunner, type PackAgentOpts } from "../scripts/agent.ts";
 import { REVIEW_AXES } from "../scripts/prompt.ts";
-import { REVIEW_BASE_REL, REVIEW_MD_REL, REVIEW_TOOLS, REVIEW_WALL_MS, writeReviewBase } from "../scripts/review.ts";
+import { REVIEW_BASE_REL, REVIEW_MD_REL, REVIEW_TOOLS, REVIEW_WALL_MS, reviewDrain, writeReviewBase } from "../scripts/review.ts";
 import { ticketSessionFile } from "../scripts/session-log.ts";
 import { SUMMARY_MD_REL, summarizeDrain } from "../scripts/summary.ts";
 import { envWithout, expect, expectEqual, gitC, runScript, withTarget } from "./target.ts";
@@ -168,6 +168,26 @@ try {
   expect("summary node after review", /id: summary[\s\S]*?depends_on: \[review\]/.test(drain));
   expect("summary node timeout 2000000", /id: summary[\s\S]*?timeout: 2000000/.test(drain));
   expect("summary script is pack bun", /id: summary[\s\S]*?script: summary/.test(drain));
+
+  // The producer/consumer pair, asserted together. Every case above feeds a hand-written review.md;
+  // this one lets review.ts write the real file for a drain that merged nothing and checks that
+  // summary.ts spends no agent on it. Hand-written fixtures are how the pair drifted once already.
+  await withTarget(async (root, artifacts) => {
+    await writeReviewBase(root, artifacts);
+    const reviewer = fakeAgent("should not run");
+    await reviewDrain(root, { artifactsDir: artifacts, runAgent: reviewer.run });
+    expectEqual("empty-range review spends no agent", reviewer.calls(), 0);
+    const reviewMd = readFileSync(join(artifacts, REVIEW_MD_REL), "utf8");
+    expect("empty-range review.md is a skip", reviewMd.startsWith("skip:"));
+    const summariser = fakeAgent("should not run");
+    await summarizeDrain(root, { artifactsDir: artifacts, runAgent: summariser.run });
+    expectEqual("empty-range summary spends no agent", summariser.calls(), 0);
+    expectEqual(
+      "empty-range summary skip names the review line",
+      readOut(artifacts),
+      `skip: review.md: ${reviewMd.trim()}\n`,
+    );
+  });
 
   console.log(JSON.stringify({ ok: true }));
 } catch (e) {

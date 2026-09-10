@@ -42,7 +42,8 @@ export async function reviewDrain(target: string, opts: TicketAgentOpts): Promis
     return;
   }
   if (!probe.stdout.trim()) {
-    writeFileSync(outFile, `empty diff ${base}...HEAD, skipped\n`);
+    // The `skip:` prefix is the contract summary.ts matches on; an empty range is a skip, not a report.
+    writeFileSync(outFile, `skip: empty diff ${base}...HEAD, skipped\n`);
     return;
   }
   const headR = await git(target, ["rev-parse", "HEAD"]);
