@@ -296,6 +296,21 @@ try {
     );
   });
 
+  // The review node is the one report node that may write the first artifact into a fresh
+  // ARTIFACTS_DIR; summary assumes review-base means one exists. Pinned so a later wave cannot drop
+  // the directory and turn a skip into a throw.
+  await withTarget(async (root, artifacts) => {
+    const fresh = join(artifacts, "fresh");
+    const fake = fakeAgent("should not run");
+    await reviewDrain(root, { artifactsDir: fresh, runAgent: fake.run });
+    expectEqual(
+      "a fresh ARTIFACTS_DIR gets the base skip",
+      readFileSync(join(fresh, REVIEW_MD_REL), "utf8"),
+      skipLine("no review-base"),
+    );
+    expectEqual("a fresh ARTIFACTS_DIR spends no agent", fake.calls(), 0);
+  });
+
   await withTarget(async (root) => {
     const proc = runScript(reviewScript, root, envWithout("ARTIFACTS_DIR"));
     expect("bare review without artifacts fails", (proc.status ?? 1) !== 0, proc.status);

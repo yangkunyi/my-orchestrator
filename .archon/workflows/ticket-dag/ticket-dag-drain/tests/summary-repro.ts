@@ -2,7 +2,7 @@
 /** Temp-Target repro: drain-end summary node. Fake agent, no live Pi, no Archon engine, no repo src/. */
 import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
-import { type AgentRunner, type PackAgentOpts } from "../scripts/agent.ts";
+import { type AgentRunner, type PackAgentOpts, type TicketAgentOpts } from "../scripts/agent.ts";
 import { REVIEW_AXES, summaryPersona } from "../scripts/prompt.ts";
 import { reviewDrain } from "../scripts/review.ts";
 import {
@@ -14,6 +14,7 @@ import {
   writeReviewBase,
 } from "../scripts/review-artifacts.ts";
 import { REVIEW_TOOLS, REVIEW_WALL_MS } from "../scripts/roles.ts";
+import { runReportNode, type ReportNode } from "../scripts/report-node.ts";
 import { roleSessionFile } from "../scripts/session-log.ts";
 import { summarizeDrain } from "../scripts/summary.ts";
 import { envWithout, expect, expectEqual, gitC, runScript, withTarget } from "./target.ts";
@@ -213,6 +214,96 @@ try {
       "the consumer's line is the owner's line",
       readOut(artifacts),
       skipLine(`review.md: ${reviewSkipReason(reviewMd)}`),
+    );
+  });
+
+  // One conformance suite over the skeleton both report nodes ride. The caller's interface is the
+  // same for both - (target, opts) in, one artifact out - so the steps the skeleton owns are asserted
+  // once, for both: the base skip writes the owner's line and spends no agent, and the answer channel
+  // is walked past the runner's own message to the session log and to the node's fallback.
+  const conformance: [string, (t: string, o: TicketAgentOpts) => Promise<void>, string, string][] = [
+    ["review", reviewDrain, REVIEW_MD_REL, "(no review text)"],
+    ["summary", summarizeDrain, SUMMARY_MD_REL, "(no summary text)"],
+  ];
+  const logged: AgentRunner = async (opts) => {
+    // A runner that hands over nothing, but had its turn written into the session file it owns.
+    const sessionFile = roleSessionFile(opts.artifactsDir, opts.sessionKey, opts.role);
+    mkdirSync(dirname(sessionFile), { recursive: true });
+    writeFileSync(
+      sessionFile,
+      `${JSON.stringify({ type: "message", message: { role: "assistant", content: "answer from the session log" } })}\n`,
+    );
+    return { sessionFile, lastError: undefined };
+  };
+  const silent: AgentRunner = async (opts) => ({
+    sessionFile: roleSessionFile(opts.artifactsDir, opts.sessionKey, opts.role),
+    lastError: undefined,
+  });
+  for (const [name, node, rel, fallback] of conformance) {
+    await withTarget(async (root, artifacts) => {
+      const fake = fakeAgent("should not run");
+      await node(root, { artifactsDir: artifacts, runAgent: fake.run });
+      expectEqual(
+        `${name} base skip is the owner's line`,
+        readFileSync(join(artifacts, rel), "utf8"),
+        skipLine("no review-base"),
+      );
+      expectEqual(`${name} spends no agent on a missing base`, fake.calls(), 0);
+    });
+
+    for (const [what, runAgent, want] of [
+      ["reads its answer back out of the session log", logged, "answer from the session log"],
+      ["ends the answer chain at its own fallback", silent, fallback],
+    ] as [string, AgentRunner, string][]) {
+      await withReview(async (root, artifacts) => {
+        await node(root, { artifactsDir: artifacts, runAgent });
+        expect(`${name} ${what}`, readFileSync(join(artifacts, rel), "utf8").includes(want));
+      });
+    }
+  }
+
+  // A fourth report node is a shape, not another copy of the six steps: this throwaway one rides the
+  // same skeleton, is handed the same range and writes through the same artifact writer.
+  await withTarget(async (root, artifacts) => {
+    const base = await writeReviewBase(root, artifacts);
+    writeFileSync(join(root, "work.txt"), "x\n");
+    gitC(root, "add", "work.txt");
+    gitC(root, "commit", "-m", "work");
+    const head = gitC(root, "rev-parse", "HEAD");
+    const fourth: ReportNode = {
+      rel: "fourth.md",
+      errorLine: (detail) => `fourth error: ${detail}`,
+      read: (input) => {
+        expectEqual("the skeleton hands the node its base", input.base, base);
+        return {
+          report: (range) =>
+            Promise.resolve(`base=${range.base}\nhead=${range.head}\nlog=${range.log}\n`),
+        };
+      },
+    };
+    await runReportNode(fourth, root, { artifactsDir: artifacts });
+    const wrote = readFileSync(join(artifacts, "fourth.md"), "utf8");
+    expectEqual("the skeleton writes the node's report: base", wrote.split("\n")[0], `base=${base}`);
+    expectEqual("the skeleton writes the node's report: head", wrote.split("\n")[1], `head=${head}`);
+    expect(
+      "the skeleton hands over the range's commit menu",
+      wrote.split("\n")[2]?.endsWith(" work") === true,
+      wrote,
+    );
+    expect("the skeleton ends the artifact once", wrote.endsWith("\n") && !wrote.endsWith("\n\n"));
+
+    // A node that stops writes its own line and never reads the range: the ordering is the skeleton's.
+    const stopper: ReportNode = {
+      rel: "stop.md",
+      errorLine: (detail) => `stop error: ${detail}`,
+      read: () => ({ stop: skipLine("nothing to report") }),
+    };
+    writeFileSync(join(root, ".git", "HEAD"), "ref: refs/heads/nope\n");
+    await runReportNode(stopper, root, { artifactsDir: artifacts });
+    expectEqual(
+      "a stop short-circuits the range read",
+      readFileSync(join(artifacts, "stop.md"), "utf8"),
+      skipLine("nothing to report"),
     );
   });
 
