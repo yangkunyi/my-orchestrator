@@ -1,52 +1,46 @@
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { mkdirSync } from "node:fs";
 import { join } from "node:path";
 import { defaultAgent, type AgentRunner, type TicketAgentOpts } from "./agent.ts";
 import { loadConfig } from "./config.ts";
-import { git, gitOrThrow } from "./git.ts";
+import { git } from "./git.ts";
 import { runNode } from "./node-entry.ts";
 import { reviewTask, REVIEW_AXES } from "./prompt.ts";
+import {
+  readReviewBase,
+  REVIEW_MD_REL,
+  reviewErrorLine,
+  reviewErrorText,
+  skipLine,
+  writeArtifact,
+} from "./review-artifacts.ts";
 import { roleAgent } from "./roles.ts";
 import { lastAssistantText } from "./session-log.ts";
 
-export const REVIEW_BASE_REL = "review-base";
-export const REVIEW_MD_REL = "review.md";
-
-export async function writeReviewBase(target: string, artifactsDir: string): Promise<string> {
-  mkdirSync(artifactsDir, { recursive: true });
-  const sha = await gitOrThrow(target, ["rev-parse", "HEAD"]);
-  writeFileSync(join(artifactsDir, REVIEW_BASE_REL), `${sha}\n`);
-  return sha;
-}
-
 export async function reviewDrain(target: string, opts: TicketAgentOpts): Promise<void> {
   const outFile = join(opts.artifactsDir, REVIEW_MD_REL);
-  const baseFile = join(opts.artifactsDir, REVIEW_BASE_REL);
   mkdirSync(opts.artifactsDir, { recursive: true });
-  if (!existsSync(baseFile)) {
-    writeFileSync(outFile, "skip: no review-base\n");
+  const baseR = readReviewBase(opts.artifactsDir);
+  if ("skip" in baseR) {
+    writeArtifact(outFile, baseR.skip);
     return;
   }
-  const base = readFileSync(baseFile, "utf8").trim();
-  if (!base) {
-    writeFileSync(outFile, "skip: empty review-base\n");
-    return;
-  }
+  const base = baseR.base;
   // Reviewers fetch the range themselves, so bun only probes it: an empty range still skips before any
   // agent is spent, and a base git cannot read is still a bun-side error rather than three confused
   // reviewers. Nothing is pasted into the prompt - the diff used to be capped and handed over.
   const probe = await git(target, ["diff", "--stat", `${base}...HEAD`]);
   if (!probe.ok) {
-    writeFileSync(outFile, `review error: git diff ${probe.stderr || probe.stdout}\n`);
+    writeArtifact(outFile, reviewErrorLine(`git diff ${probe.stderr || probe.stdout}`));
     return;
   }
   if (!probe.stdout.trim()) {
-    // The `skip:` prefix is the contract summary.ts matches on; an empty range is a skip, not a report.
-    writeFileSync(outFile, `skip: empty diff ${base}...HEAD, skipped\n`);
+    // An empty range is a skip, not a report: the consumer must not spend a summary agent on it.
+    writeArtifact(outFile, skipLine(`empty diff ${base}...HEAD, skipped`));
     return;
   }
   const headR = await git(target, ["rev-parse", "HEAD"]);
   if (!headR.ok) {
-    writeFileSync(outFile, `review error: git rev-parse ${headR.stderr || headR.stdout}\n`);
+    writeArtifact(outFile, reviewErrorLine(`git rev-parse ${headR.stderr || headR.stdout}`));
     return;
   }
   const head = headR.stdout.trim();
@@ -72,11 +66,11 @@ export async function reviewDrain(target: string, opts: TicketAgentOpts): Promis
         return { title, body: text.trim() };
       } catch (e) {
         const msg = e instanceof Error ? e.message : String(e);
-        return { title, body: `review error: ${msg}` };
+        return { title, body: reviewErrorText(msg) };
       }
     }),
   );
-  writeFileSync(outFile, sections.map((s) => `## ${s.title}\n\n${s.body}\n`).join("\n"));
+  writeArtifact(outFile, sections.map((s) => `## ${s.title}\n\n${s.body}\n`).join("\n"));
 }
 
 export async function runReviewCli(): Promise<void> {

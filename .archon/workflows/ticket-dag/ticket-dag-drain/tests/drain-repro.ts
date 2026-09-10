@@ -4,7 +4,7 @@ import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { noopAgent } from "../scripts/agent.ts";
 import { rematchLeftovers } from "../scripts/rematch.ts";
-import { REVIEW_BASE_REL } from "../scripts/review.ts";
+import { REVIEW_BASE_REL } from "../scripts/review-artifacts.ts";
 import { pickStartable } from "../scripts/pick.ts";
 import { conflictTicket } from "../scripts/conflict.ts";
 import { implementTicket } from "../scripts/implement.ts";

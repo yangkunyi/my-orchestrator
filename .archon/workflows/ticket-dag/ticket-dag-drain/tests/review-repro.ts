@@ -6,12 +6,18 @@ import { type AgentRunner, type PackAgentOpts } from "../scripts/agent.ts";
 import { REVIEW_AXES } from "../scripts/prompt.ts";
 import { roleSessionFile } from "../scripts/session-log.ts";
 import { rematchLeftovers } from "../scripts/rematch.ts";
+import { reviewDrain } from "../scripts/review.ts";
 import {
+  readReviewBase,
   REVIEW_BASE_REL,
   REVIEW_MD_REL,
-  reviewDrain,
+  reviewErrorLine,
+  reviewErrorText,
+  reviewSkipReason,
+  skipLine,
+  writeArtifact,
   writeReviewBase,
-} from "../scripts/review.ts";
+} from "../scripts/review-artifacts.ts";
 import { REVIEW_TOOLS, REVIEW_WALL_MS } from "../scripts/roles.ts";
 import {
   envWithout,
@@ -74,11 +80,72 @@ try {
     expectEqual("no leftovers, HEAD unchanged", gitC(root, "rev-parse", "HEAD"), head);
   });
 
+  // The review-base / review.md protocol has one owner (review-artifacts.ts): the lines review.ts
+  // writes are built by that module, and summary.ts reads them back through its one reader. The
+  // literals below are the byte contract; the round-trip assertions are what make the two sides
+  // share one spelling instead of matching by convention.
+  expectEqual("skip line", skipLine("no review-base"), "skip: no review-base\n");
+  expectEqual("review error line", reviewErrorLine("git diff boom"), "review error: git diff boom\n");
+  expectEqual("one axis' error body", reviewErrorText("boom"), "review error: boom");
+  expectEqual(
+    "the reader takes the producer's skip",
+    reviewSkipReason(skipLine("empty diff abc...HEAD, skipped")),
+    "skip: empty diff abc...HEAD, skipped",
+  );
+  expectEqual(
+    "the reader takes the producer's error",
+    reviewSkipReason(reviewErrorLine("git diff boom")),
+    "review error: git diff boom",
+  );
+  expectEqual("a report is not a skip", reviewSkipReason(`## 1. ${REVIEW_AXES[0]}\n\nfindings\n`), null);
+  expectEqual("an empty review.md is not a skip", reviewSkipReason("\n"), null);
+  // The P1's shape: the bare sentence review.ts used to write must still read as a report, so the
+  // skip vocabulary is what separates the two cases rather than the wording around it.
+  expectEqual(
+    "the bare sentence is not a skip",
+    reviewSkipReason("empty diff abc...HEAD, skipped\n"),
+    null,
+  );
+
+  await withTarget(async (root, artifacts) => {
+    const file = join(artifacts, "probe.md");
+    writeArtifact(file, "no newline");
+    expectEqual("one artifact ends with one newline", readFileSync(file, "utf8"), "no newline\n");
+    writeArtifact(file, "no second newline\n");
+    expectEqual("the newline is not doubled", readFileSync(file, "utf8"), "no second newline\n");
+  });
+
+  // An import direction has no runtime symptom, and rematch is the drain's first node: it must not
+  // reach into the drain-end review module for the base the whole drain reads.
+  const rematchSrc = readFileSync(join(import.meta.dir, "../scripts/rematch.ts"), "utf8");
+  expect("rematch does not import the review node", !rematchSrc.includes('from "./review.ts"'));
+  expect(
+    "rematch takes its writer from the artifact module",
+    /import \{ writeReviewBase \} from "\.\/review-artifacts\.ts"/.test(rematchSrc),
+  );
+
   await withTarget(async (root, artifacts) => {
     const fake = fakeAgent("should not run");
     await reviewDrain(root, { artifactsDir: artifacts, runAgent: fake.run });
     expectEqual("missing review-base does not call agent", fake.calls(), 0);
     expectEqual("missing review-base skip", readOut(artifacts), "skip: no review-base\n");
+    // The producer's real bytes are the owner's line, and the consumer's reader agrees with them.
+    expectEqual("the producer's skip is the owner's line", readOut(artifacts), skipLine("no review-base"));
+    expectEqual("the reader agrees with the producer", reviewSkipReason(readOut(artifacts)), "skip: no review-base");
+  });
+
+  await withTarget(async (root, artifacts) => {
+    expectEqual("missing review-base reads as a skip", readReviewBase(artifacts), {
+      skip: "skip: no review-base\n",
+    });
+    writeFileSync(join(artifacts, REVIEW_BASE_REL), "deadbeefdeadbeefdeadbeefdeadbeefdeadbeef\n");
+    expectEqual("a base reads back trimmed", readReviewBase(artifacts), {
+      base: "deadbeefdeadbeefdeadbeefdeadbeefdeadbeef",
+    });
+    writeFileSync(join(artifacts, REVIEW_BASE_REL), "\n");
+    expectEqual("an empty review-base reads as a skip", readReviewBase(artifacts), {
+      skip: "skip: empty review-base\n",
+    });
   });
 
   await withTarget(async (root, artifacts) => {

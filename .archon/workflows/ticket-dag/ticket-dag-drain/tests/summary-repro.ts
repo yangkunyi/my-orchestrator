@@ -4,10 +4,18 @@ import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { type AgentRunner, type PackAgentOpts } from "../scripts/agent.ts";
 import { REVIEW_AXES } from "../scripts/prompt.ts";
-import { REVIEW_BASE_REL, REVIEW_MD_REL, reviewDrain, writeReviewBase } from "../scripts/review.ts";
+import { reviewDrain } from "../scripts/review.ts";
+import {
+  REVIEW_BASE_REL,
+  REVIEW_MD_REL,
+  reviewSkipReason,
+  skipLine,
+  SUMMARY_MD_REL,
+  writeReviewBase,
+} from "../scripts/review-artifacts.ts";
 import { REVIEW_TOOLS, REVIEW_WALL_MS } from "../scripts/roles.ts";
 import { roleSessionFile } from "../scripts/session-log.ts";
-import { SUMMARY_MD_REL, summarizeDrain } from "../scripts/summary.ts";
+import { summarizeDrain } from "../scripts/summary.ts";
 import { envWithout, expect, expectEqual, gitC, runScript, withTarget } from "./target.ts";
 
 const summaryScript = join(import.meta.dir, "../scripts/summary.ts");
@@ -187,6 +195,13 @@ try {
       "empty-range summary skip names the review line",
       readOut(artifacts),
       `skip: review.md: ${reviewMd.trim()}\n`,
+    );
+    // ... and the consumer writes it from the owner's own vocabulary: the reader's reason line, the
+    // owner's line ending. That is the pair the empty-drain P1 was missing.
+    expectEqual(
+      "the consumer's line is the owner's line",
+      readOut(artifacts),
+      skipLine(`review.md: ${reviewSkipReason(reviewMd)}`),
     );
   });
 

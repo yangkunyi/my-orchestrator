@@ -1,19 +1,20 @@
-import { existsSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { defaultAgent, type AgentRunner, type TicketAgentOpts } from "./agent.ts";
 import { loadConfig } from "./config.ts";
 import { git } from "./git.ts";
 import { runNode } from "./node-entry.ts";
 import { summaryTask } from "./prompt.ts";
-import { REVIEW_BASE_REL, REVIEW_MD_REL } from "./review.ts";
+import {
+  readReviewBase,
+  REVIEW_MD_REL,
+  reviewSkipReason,
+  skipLine,
+  SUMMARY_MD_REL,
+  writeArtifact,
+} from "./review-artifacts.ts";
 import { roleAgent } from "./roles.ts";
 import { lastAssistantText } from "./session-log.ts";
-
-export const SUMMARY_MD_REL = "summary.md";
-
-function write(outFile: string, body: string): void {
-  writeFileSync(outFile, body.endsWith("\n") ? body : `${body}\n`);
-}
 
 /**
  * The last node: one agent merges the three reviews into a report a human reads first. It runs only
@@ -22,33 +23,30 @@ function write(outFile: string, body: string): void {
  */
 export async function summarizeDrain(target: string, opts: TicketAgentOpts): Promise<void> {
   const outFile = join(opts.artifactsDir, SUMMARY_MD_REL);
-  const baseFile = join(opts.artifactsDir, REVIEW_BASE_REL);
+  const baseR = readReviewBase(opts.artifactsDir);
+  if ("skip" in baseR) {
+    writeArtifact(outFile, baseR.skip);
+    return;
+  }
+  const base = baseR.base;
   const reviewFile = join(opts.artifactsDir, REVIEW_MD_REL);
-  if (!existsSync(baseFile)) {
-    write(outFile, "skip: no review-base");
-    return;
-  }
-  const base = readFileSync(baseFile, "utf8").trim();
-  if (!base) {
-    write(outFile, "skip: empty review-base");
-    return;
-  }
   if (!existsSync(reviewFile)) {
-    write(outFile, "skip: no review.md");
+    writeArtifact(outFile, skipLine("no review.md"));
     return;
   }
   const reviewMd = readFileSync(reviewFile, "utf8");
   if (!reviewMd.trim()) {
-    write(outFile, "skip: empty review.md");
+    writeArtifact(outFile, skipLine("empty review.md"));
     return;
   }
-  if (/^(skip|review error):/.test(reviewMd.trim())) {
-    write(outFile, `skip: review.md: ${reviewMd.trim().split("\n")[0]}`);
+  const skipped = reviewSkipReason(reviewMd);
+  if (skipped) {
+    writeArtifact(outFile, skipLine(`review.md: ${skipped}`));
     return;
   }
   const headR = await git(target, ["rev-parse", "HEAD"]);
   if (!headR.ok) {
-    write(outFile, `summary error: git rev-parse ${headR.stderr || headR.stdout}`);
+    writeArtifact(outFile, `summary error: git rev-parse ${headR.stderr || headR.stdout}`);
     return;
   }
   const logR = await git(target, ["log", `${base}..HEAD`, "--oneline"]);
@@ -67,10 +65,10 @@ export async function summarizeDrain(target: string, opts: TicketAgentOpts): Pro
     // The runner's own final message first, as in review: the session log is the fallback for a runner
     // that does not hand one over.
     const text = r.text ?? lastAssistantText(r.sessionFile) ?? r.lastError ?? "(no summary text)";
-    write(outFile, text);
+    writeArtifact(outFile, text);
   } catch (e) {
     const msg = e instanceof Error ? e.message : String(e);
-    write(outFile, `summary error: ${msg}`);
+    writeArtifact(outFile, `summary error: ${msg}`);
   }
 }
 

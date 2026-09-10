@@ -1,7 +1,7 @@
 import { addAttempted } from "./attempted.ts";
 import { completeTicket, hasTicketMergeCommit, stamp, withMergeLock } from "./main-writes.ts";
 import { runNode } from "./node-entry.ts";
-import { writeReviewBase } from "./review.ts";
+import { writeReviewBase } from "./review-artifacts.ts";
 import { leftoverInFlight, scanTickets } from "./tickets.ts";
 
 export async function rematchLeftovers(target: string, artifactsDir?: string): Promise<void> {
