@@ -1,12 +1,8 @@
 import { existsSync } from "node:fs";
 import { join } from "node:path";
-import {
-  conflictPrompt,
-  defaultAgent,
-  ticketSessionFile,
-  type AgentRunner,
-  type TicketAgentOpts,
-} from "./agent.ts";
+import { defaultAgent, type AgentRunner, type TicketAgentOpts } from "./agent.ts";
+import { conflictPrompt } from "./prompt.ts";
+import { ticketSessionFile } from "./session-log.ts";
 import { syncWorktreeEnv } from "./worktree-env.ts";
 import { loadConfig, type PackConfig } from "./config.ts";
 import { runNode } from "./node-entry.ts";

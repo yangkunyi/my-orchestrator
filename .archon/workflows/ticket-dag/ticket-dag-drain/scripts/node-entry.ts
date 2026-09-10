@@ -1,5 +1,5 @@
-import { reexecForProxy } from "./agent.ts";
 import { loadConfig, type PackConfig } from "./config.ts";
+import { reexecForProxy } from "./proxy.ts";
 
 export type NodeEnv = {
   target: string;

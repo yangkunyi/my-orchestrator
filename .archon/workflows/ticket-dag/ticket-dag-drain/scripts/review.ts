@@ -1,14 +1,10 @@
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import {
-  defaultAgent,
-  lastAssistantText,
-  type AgentRunner,
-  type TicketAgentOpts,
-} from "./agent.ts";
+import { defaultAgent, type AgentRunner, type TicketAgentOpts } from "./agent.ts";
 import { loadConfig } from "./config.ts";
 import { git, gitOrThrow } from "./git.ts";
 import { runNode } from "./node-entry.ts";
+import { lastAssistantText } from "./session-log.ts";
 
 export const REVIEW_BASE_REL = "review-base";
 export const REVIEW_MD_REL = "review.md";

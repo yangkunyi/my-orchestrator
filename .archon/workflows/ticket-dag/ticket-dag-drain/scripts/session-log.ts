@@ -1,0 +1,61 @@
+import { existsSync, readFileSync } from "node:fs";
+import { join } from "node:path";
+import type { AgentRole } from "./agent.ts";
+
+export function ticketSessionFile(artifactsDir: string, ticketId: string, role: AgentRole): string {
+  return join(artifactsDir, "sessions", ticketId, `${role}.jsonl`);
+}
+
+function contentText(content: unknown): string | undefined {
+  if (typeof content === "string" && content.trim()) return content;
+  if (!Array.isArray(content)) return undefined;
+  const parts: string[] = [];
+  for (const part of content) {
+    if (typeof part === "string") parts.push(part);
+    else if (part && typeof part === "object" && "text" in part) {
+      const text = (part as { text: unknown }).text;
+      if (typeof text === "string" && text) parts.push(text);
+    }
+  }
+  const joined = parts.join("").trim();
+  return joined.length > 0 ? joined : undefined;
+}
+
+type Row = {
+  type?: unknown;
+  message?: { role?: unknown; content?: unknown; errorMessage?: unknown };
+};
+
+/** One pass over the session jsonl: the last assistant text and the last errorMessage. */
+function scan(sessionFile: string): { text?: string; error?: string } {
+  if (!existsSync(sessionFile)) return {};
+  let text: string | undefined;
+  let error: string | undefined;
+  for (const line of readFileSync(sessionFile, "utf8").split("\n")) {
+    if (!line) continue;
+    let row: Row | null;
+    try {
+      row = JSON.parse(line) as Row | null;
+    } catch {
+      continue; /* skip bad line */
+    }
+    // ponytail: optional chaining, not a try/catch - a JSON line that is not an object must skip,
+    // the way the old per-reader try/catch did.
+    const type = row?.type;
+    const msg = row?.message;
+    if (typeof msg?.errorMessage === "string" && msg.errorMessage.length > 0) error = msg.errorMessage;
+    if (type && type !== "message") continue;
+    if (msg?.role !== "assistant") continue;
+    const found = contentText(msg.content);
+    if (found) text = found;
+  }
+  return { text, error };
+}
+
+export function lastAssistantText(sessionFile: string): string | undefined {
+  return scan(sessionFile).text;
+}
+
+export function lastAssistantError(sessionFile: string): string | undefined {
+  return scan(sessionFile).error;
+}

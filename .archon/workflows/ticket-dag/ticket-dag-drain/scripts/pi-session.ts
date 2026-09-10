@@ -1,13 +1,7 @@
 import { existsSync, mkdirSync, writeFileSync } from "node:fs";
 import { dirname } from "node:path";
-import {
-  AGENT_WALL_MS,
-  armSessionAbort,
-  lastAssistantError,
-  ticketSessionFile,
-  type PackAgentOpts,
-  type PackAgentResult,
-} from "./agent.ts";
+import { AGENT_WALL_MS, armSessionAbort, type PackAgentOpts, type PackAgentResult } from "./agent.ts";
+import { lastAssistantError, ticketSessionFile } from "./session-log.ts";
 import { prependVenvBin } from "./worktree-env.ts";
 
 export async function runPackPi(opts: PackAgentOpts): Promise<PackAgentResult> {
