@@ -13,8 +13,10 @@ export type PackAgentOpts = {
   role: AgentRole;
   model: string | undefined;
   thinkingLevel: ThinkingLevel;
-  /** Which runtime to spend on this node. Defaults to pi; only Pi serves the review node. */
+  /** Which runtime to spend on this node. Defaults to pi; every node takes either one. */
   runner?: Runner;
+  /** The skill/contract for runners that have a system prompt. Pi carries it in the message. */
+  persona?: string;
   prompt: string;
   tools?: string[];
   useBash?: boolean;
@@ -24,6 +26,11 @@ export type PackAgentOpts = {
 export type PackAgentResult = {
   sessionFile: string;
   lastError: string | undefined;
+  /**
+   * The agent's final message. A runner that already streams its own events hands it over here;
+   * nobody should have to re-parse another product's session log to learn what an agent said.
+   */
+  text?: string;
 };
 
 export type AgentRunner = (opts: PackAgentOpts) => Promise<PackAgentResult>;

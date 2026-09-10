@@ -5,9 +5,9 @@
  */
 import { chmodSync, existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { dshAgent } from "../scripts/dsh-agent.ts";
 import type { ThinkingLevel } from "../scripts/config.ts";
-import { implementPrompt } from "../scripts/prompt.ts";
+import { dshAgent } from "../scripts/dsh-agent.ts";
+import { implementTask, personaFor, REVIEW_AXES, reviewPersona, reviewTask } from "../scripts/prompt.ts";
 import { expect, expectEqual, expectReject, mkTemp, runScript } from "./target.ts";
 
 const STUB = `#!${process.execPath}
@@ -51,7 +51,8 @@ function handle(message) {
     writeFileSync([dir, "session.v3.jsonl"].join("/"), JSON.stringify({ stub: true }) + "\\n");
     reply(message.id, { messageId: "message-1" });
     notify("session.status", { sessionId, status: "running" });
-    notify("session.event", { sessionId, event: { type: "turn/end", seq: 1, data: { turn: 1, reason: { kind: turnKind } } } });
+    notify("session.event", { sessionId, event: { type: "assistant/message", seq: 11, data: { turn: 1, step: 1, message: { role: "assistant", content: [{ type: "reasoning", text: "THINKING-LEAK" }, { type: "text", text: "STUB-ANSWER" }] } } } });
+    notify("session.event", { sessionId, event: { type: "turn/end", seq: 12, data: { turn: 1, reason: { kind: turnKind } } } });
     notify("session.status", { sessionId, status: "idle" });
     return;
   }
@@ -77,7 +78,7 @@ writeFileSync(
   probe,
   `import { dshAgent } from ${JSON.stringify(join(import.meta.dir, "../scripts/dsh-agent.ts"))};\n` +
     `try {\n` +
-    `  await dshAgent({ cwd: process.cwd(), artifactsDir: process.cwd(), ticketId: "feat/01", role: "implement", model: undefined, thinkingLevel: "high", prompt: "do it" });\n` +
+    `  await dshAgent({ cwd: process.cwd(), artifactsDir: process.cwd(), ticketId: "feat/01", role: "implement", model: undefined, thinkingLevel: "high", prompt: "do it", persona: "PERSONA" });\n` +
     `  console.log(JSON.stringify({ threw: false }));\n` +
     `} catch (e) {\n` +
     `  console.log(JSON.stringify({ threw: true, message: e instanceof Error ? e.message : String(e) }));\n` +
@@ -91,7 +92,14 @@ process.env.DEEPSEEK_BASE_URL = "https://gateway.invalid/v1";
 process.env.DEEPSEEK_API_KEY = "test-key";
 process.env.STUB_SEEN = seen;
 
-const run = (role: "implement" | "conflict", prompt: string, model?: string, level: ThinkingLevel = "high") =>
+type Call = {
+  role: "implement" | "conflict" | "review";
+  task: string;
+  persona: string;
+  model?: string;
+  level?: ThinkingLevel;
+};
+const run = ({ role, task, persona, model, level = "high" }: Call) =>
   dshAgent({
     cwd: work,
     artifactsDir: work,
@@ -99,12 +107,13 @@ const run = (role: "implement" | "conflict", prompt: string, model?: string, lev
     role,
     model,
     thinkingLevel: level,
-    prompt,
+    prompt: task,
+    persona,
   });
 
 try {
-  const prompt = implementPrompt("tickets/01-demo.md");
-  const result = await run("implement", prompt);
+  const task = implementTask("tickets/01-demo.md");
+  const result = await run({ role: "implement", task, persona: personaFor("implement", "dsh") });
   const got = JSON.parse(readFileSync(seen, "utf8")) as Record<string, any>;
 
   expectEqual("stub launched with the minimal profile", got.argv.join(" "), "--profile sdk-minimal");
@@ -113,31 +122,60 @@ try {
   expect("persona carries the implement skill", got.persona.includes("Implement the work described by the user"));
   expect("persona carries the tdd rules", got.persona.includes("Red before green."));
   expect("persona carries the seams rule", got.persona.includes("Test only at pre-agreed seams."));
-  expect("persona keeps the optional references reachable", got.persona.includes("codebase-design/SKILL.md"));
+  expect("persona drops the out-of-scope pointer", !got.persona.includes("codebase-design"));
   expect("persona keeps the examples reachable", got.persona.includes("tests.md"));
+  expect("persona names the skill tree it came from", got.persona.includes(".pi/agent/skills/tdd"));
   expectEqual("initialize cwd", got.initialize.cwd, work);
   expectEqual("initialize provider", got.initialize.provider, "deepseek-official");
   expectEqual("initialize model defaults", got.initialize.model, "deepseek-flash");
   expectEqual("initialize effort from thinkingLevel", got.initialize.reasoningEffort, "high");
   expect("session id is ours", String(got.prompt.sessionId).startsWith("session-"));
-  const text = got.prompt.contentBlocks[0].text as string;
-  expect("message carries the task", text.includes("tickets/01-demo.md"));
-  expect("message drops the skill body the persona carries", !text.includes("Implement the work described by the user"));
-  expectEqual("session log is returned", result.sessionFile, join(home, "sessions", `--${work.replace(/^\/+|\/+$/g, "").replace(/[^a-zA-Z0-9]+/g, "-")}--`, got.prompt.sessionId, "session.v3.jsonl"));
+  expectEqual("the message is the task, never the skill", got.prompt.contentBlocks[0].text, task);
+  expectEqual(
+    "session log is returned",
+    result.sessionFile,
+    join(
+      home,
+      "sessions",
+      `--${work.replace(/^\/+|\/+$/g, "").replace(/[^a-zA-Z0-9]+/g, "-")}--`,
+      got.prompt.sessionId,
+      "session.v3.jsonl",
+    ),
+  );
   expect("session log exists", existsSync(result.sessionFile));
   expectEqual("completed turn has no error", result.lastError, undefined);
+  expectEqual("final text comes from the event stream", result.text, "STUB-ANSWER");
+  expect("reasoning parts never leak into the answer", !(result.text ?? "").includes("THINKING-LEAK"));
 
   process.env.STUB_TURN_KIND = "aborted";
-  const second = await run("conflict", "resolve the conflict", "custom-model");
+  const second = await run({
+    role: "conflict",
+    task: "resolve the conflict",
+    persona: personaFor("conflict", "dsh"),
+    model: "custom-model",
+  });
   const got2 = JSON.parse(readFileSync(seen, "utf8")) as Record<string, any>;
   expectEqual("configured model wins", got2.initialize.model, "custom-model");
   expectEqual("a non-completed turn is reported", second.lastError, "turn ended: aborted");
+  expect("partial text still comes back", (second.text ?? "").length > 0);
 
-  await expectReject(
-    "review stays on Pi",
-    () => run("review" as unknown as "conflict", "review the diff"),
-    /does not serve the review node/,
+  const reviewPayload = reviewTask("abc", "head1", "c1 do a thing\n");
+  const review = await run({
+    role: "review",
+    task: reviewPayload,
+    persona: reviewPersona("abc", REVIEW_AXES[0]),
+  });
+  const got3 = JSON.parse(readFileSync(seen, "utf8")) as Record<string, any>;
+  expectEqual("review message is the range payload", got3.prompt.contentBlocks[0].text, reviewPayload);
+  expect("review persona pins the range", got3.persona.includes("abc...HEAD"));
+  expect(
+    "review persona is read-only by instruction",
+    got3.persona.includes("read-only") && got3.persona.includes("Never write:"),
   );
+  expect("review persona names no Pi tool line", !got3.persona.includes("Use read, grep, find, and ls"));
+  expect("review persona never tells it to spawn agents", got3.persona.includes("Do not spawn agents"));
+  expect("review persona carries its axis", got3.persona.includes(`Your axis: ${REVIEW_AXES[0]}`));
+  expectEqual("review returns its text too", review.text, "STUB-ANSWER");
 
   for (const [level, effort] of [
     ["off", "off"],
@@ -146,24 +184,80 @@ try {
     ["xhigh", "high"],
     ["max", "max"],
   ] as const) {
-    await run("conflict", "resolve the conflict", undefined, level);
+    await run({ role: "conflict", task: "resolve the conflict", persona: personaFor("conflict", "dsh"), level });
     const mapped = JSON.parse(readFileSync(seen, "utf8")) as Record<string, any>;
     expectEqual(`thinkingLevel ${level} maps to effort ${effort}`, mapped.initialize.reasoningEffort, effort);
   }
 
+  await expectReject(
+    "a persona is required",
+    () =>
+      dshAgent({
+        cwd: work,
+        artifactsDir: work,
+        ticketId: "feat/01",
+        role: "implement",
+        model: undefined,
+        thinkingLevel: "high",
+        prompt: "do it",
+      }),
+    /needs opts.persona/,
+  );
+
   delete process.env.DEEPSEEK_BASE_URL;
   delete process.env.DEEPSEEK_API_KEY;
   const bare = runScript(probe, work, { HOME: noHome, DSH_BIN: stub, DSH_HOME: home });
-  const bareOut = JSON.parse((bare.stdout || "{}").trim().split("\n").pop() ?? "{}") as { threw?: boolean; message?: string };
+  const bareOut = JSON.parse((bare.stdout || "{}").trim().split("\n").pop() ?? "{}") as {
+    threw?: boolean;
+    message?: string;
+  };
   expect("credentials are required", bareOut.threw === true);
   expect("and the error names what to set", (bareOut.message ?? "").includes("needs DEEPSEEK_BASE_URL"));
+
+  // The dsh implement persona reads the skill off pi's tree at run time and drops the one paragraph
+  // that is out of scope for a ticket-executing node. homedir() ignores process.env.HOME, so both
+  // cases run in children, like the credentials probe above.
+  const skillHome = mkTemp("pack-dsh-skills-");
+  mkdirSync(join(skillHome, ".pi", "agent", "skills", "tdd"), { recursive: true });
+  writeFileSync(
+    join(skillHome, ".pi", "agent", "skills", "tdd", "SKILL.md"),
+    "---\nname: tdd\ndescription: stub\n---\n\nFAKE-RED-BEFORE-GREEN.\n\nRead the codebase-design skill for the vocabulary.\n",
+  );
+  const personaProbe = join(work, "persona.ts");
+  writeFileSync(
+    personaProbe,
+    `import { personaFor } from ${JSON.stringify(join(import.meta.dir, "../scripts/prompt.ts"))};\n` +
+      `console.log(JSON.stringify({ persona: personaFor("implement", "dsh") }));\n`,
+  );
+  const personaOf = (env: { HOME: string }): string => {
+    const proc = runScript(personaProbe, work, env);
+    const out = JSON.parse((proc.stdout || "{}").trim().split("\n").pop() ?? "{}") as { persona?: string };
+    return out.persona ?? "";
+  };
+  const readPersona = personaOf({ HOME: skillHome });
+  expect("the skill body is read at run time", readPersona.includes("FAKE-RED-BEFORE-GREEN."));
+  expect("the out-of-scope pointer is filtered out", !readPersona.includes("codebase-design"));
+  expect(
+    "the persona names the tree it came from",
+    readPersona.includes(join(skillHome, ".pi", "agent", "skills", "tdd")),
+  );
+  const fallbackPersona = personaOf({ HOME: noHome });
+  expect("no skill tree falls back to the inlined body", fallbackPersona.includes("Red before green."));
+  expect("the fallback drops the pointer too", !fallbackPersona.includes("codebase-design"));
 
   console.log(JSON.stringify({ ok: true }));
 } catch (e) {
   console.log(JSON.stringify({ ok: false, error: e instanceof Error ? e.message : String(e) }));
   process.exitCode = 1;
 } finally {
-  for (const key of ["DSH_BIN", "DSH_HOME", "DEEPSEEK_BASE_URL", "DEEPSEEK_API_KEY", "STUB_SEEN", "STUB_TURN_KIND"] as const) {
+  for (const key of [
+    "DSH_BIN",
+    "DSH_HOME",
+    "DEEPSEEK_BASE_URL",
+    "DEEPSEEK_API_KEY",
+    "STUB_SEEN",
+    "STUB_TURN_KIND",
+  ] as const) {
     if (saved[key] === undefined) delete process.env[key];
     else process.env[key] = saved[key];
   }

@@ -16,7 +16,6 @@ import { join } from "node:path";
 import { createInterface } from "node:readline";
 import { AGENT_WALL_MS, type PackAgentOpts, type PackAgentResult } from "./agent.ts";
 import type { ThinkingLevel } from "./config.ts";
-import { personaFor, taskTextOf } from "./prompt.ts";
 
 const PROFILE = "sdk-minimal";
 const PROVIDER = "deepseek-official";
@@ -42,11 +41,29 @@ type Frame = {
   params?: {
     sessionId?: string;
     status?: string;
-    event?: { type?: string; data?: { reason?: { kind?: string } } };
+    event?: {
+      type?: string;
+      data?: { reason?: { kind?: string }; message?: { content?: unknown } };
+    };
   };
   result?: unknown;
   error?: { code?: number; message?: string };
 };
+
+/**
+ * The message a turn ends with. The harness emits reasoning parts too and they also carry `text`, so
+ * only type "text" parts count: anything else would leak thinking into the node's product.
+ */
+function answerText(content: unknown): string | undefined {
+  if (typeof content === "string") return content.trim() ? content : undefined;
+  if (!Array.isArray(content)) return undefined;
+  const parts = content
+    .filter((part): part is { type?: unknown; text?: unknown } => Boolean(part) && typeof part === "object")
+    .filter((part) => part.type === "text" && typeof part.text === "string" && part.text.length > 0)
+    .map((part) => part.text as string);
+  const joined = parts.join("").trim();
+  return joined.length > 0 ? joined : undefined;
+}
 
 type Credentials = { baseUrl: string; apiKey: string; model: string | undefined };
 
@@ -83,6 +100,7 @@ class DshRuntime {
   private sawTurn = false;
   private idle: { resolve: () => void; reject: (e: Error) => void } | undefined;
   private ended: string | undefined;
+  private said: string | undefined;
   private closed = false;
 
   constructor(
@@ -137,7 +155,13 @@ class DshRuntime {
     if (params?.sessionId !== this.sessionId) return; // child sessions carry their own ids
     if (frame.method === "session.event") {
       this.sawTurn = true;
-      if (params.event?.type === "turn/end") this.ended = params.event.data?.reason?.kind;
+      const event = params.event;
+      if (event?.type === "turn/end") this.ended = event.data?.reason?.kind;
+      // The final answer is the last assistant message that carried text, not the last message.
+      if (event?.type === "assistant/message") {
+        const text = answerText(event.data?.message?.content);
+        if (text) this.said = text;
+      }
       return;
     }
     if (frame.method === "session.status") {
@@ -198,6 +222,10 @@ class DshRuntime {
     return this.ended;
   }
 
+  lastMessage(): string | undefined {
+    return this.said;
+  }
+
   kill(): void {
     this.child.kill("SIGKILL");
   }
@@ -223,12 +251,13 @@ function dshSessionFile(dshHome: string, cwd: string, sessionId: string): string
 }
 
 export async function dshAgent(opts: PackAgentOpts): Promise<PackAgentResult> {
-  if (opts.role === "review") throw new Error("the dsh runner does not serve the review node");
-  const role = opts.role;
+  const persona = opts.persona;
+  if (!persona) throw new Error("the dsh runner needs opts.persona: the skill or contract for its system prompt");
   const creds = credentials();
   const dshHome = process.env.DSH_HOME?.trim() || DEFAULT_DSH_HOME;
-  // ponytail: tools and useBash are ignored - the minimal tree is fixed at one persistent bash tool.
-  // Add them to a patch/profile layer if a node ever needs a different tool set.
+  // ponytail: tools and useBash are ignored - the minimal tree is fixed at one persistent bash tool,
+  // and it mounts no sandbox plugin, so the review node's read-only contract is instruction-only here
+  // (the persona says what may never be run). Pi still enforces it structurally.
   const rt = new DshRuntime(
     opts.cwd,
     {
@@ -236,7 +265,7 @@ export async function dshAgent(opts: PackAgentOpts): Promise<PackAgentResult> {
       DSH_HOME: dshHome,
       DEEPSEEK_BASE_URL: creds.baseUrl,
       DEEPSEEK_API_KEY: creds.apiKey,
-      DSH_SYSTEM_PROMPT: personaFor(role),
+      DSH_SYSTEM_PROMPT: persona,
     },
     opts.model?.trim() || creds.model || DEFAULT_MODEL,
     EFFORT[opts.thinkingLevel],
@@ -247,7 +276,7 @@ export async function dshAgent(opts: PackAgentOpts): Promise<PackAgentResult> {
   const sessionFile = (): string => dshSessionFile(dshHome, opts.cwd, rt.sessionId);
   try {
     await Promise.race([
-      rt.run(taskTextOf(role, opts.prompt)),
+      rt.run(opts.prompt),
       new Promise<never>((_, reject) => {
         wall = setTimeout(() => {
           aborted = true;
@@ -260,10 +289,15 @@ export async function dshAgent(opts: PackAgentOpts): Promise<PackAgentResult> {
     return {
       sessionFile: sessionFile(),
       lastError: reason && reason !== "completed" ? `turn ended: ${reason}` : undefined,
+      text: rt.lastMessage(),
     };
   } catch (e) {
     const msg = e instanceof Error ? e.message : String(e);
-    return { sessionFile: sessionFile(), lastError: aborted ? "agent aborted after wall clock" : msg };
+    return {
+      sessionFile: sessionFile(),
+      lastError: aborted ? "agent aborted after wall clock" : msg,
+      text: rt.lastMessage(),
+    };
   } finally {
     clearTimeout(wall);
     await rt.close();

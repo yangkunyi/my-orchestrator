@@ -3,6 +3,7 @@
 import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { type AgentRunner, type PackAgentOpts } from "../scripts/agent.ts";
+import { REVIEW_AXES } from "../scripts/prompt.ts";
 import { ticketSessionFile } from "../scripts/session-log.ts";
 import { rematchLeftovers } from "../scripts/rematch.ts";
 import {
@@ -28,23 +29,28 @@ function readOut(artifacts: string): string {
   return readFileSync(join(artifacts, REVIEW_MD_REL), "utf8");
 }
 
+function section(body: string, i: number): string {
+  const part = body.split(/^## /m)[i + 1] ?? "";
+  const nl = part.indexOf("\n");
+  return nl < 0 ? "" : part.slice(nl);
+}
+
 function fakeAgent(
   text: string,
-): { run: AgentRunner; calls: () => number; last: () => PackAgentOpts | undefined } {
-  let calls = 0;
-  let last: PackAgentOpts | undefined;
+  answer?: string,
+): { run: AgentRunner; calls: () => number; all: () => PackAgentOpts[] } {
+  const seen: PackAgentOpts[] = [];
   const run: AgentRunner = async (opts) => {
-    calls += 1;
-    last = opts;
+    seen.push(opts);
     const sessionFile = ticketSessionFile(opts.artifactsDir, opts.ticketId, opts.role);
     mkdirSync(dirname(sessionFile), { recursive: true });
     writeFileSync(
       sessionFile,
       `${JSON.stringify({ type: "message", message: { role: "assistant", content: text } })}\n`,
     );
-    return { sessionFile, lastError: undefined };
+    return { sessionFile, lastError: undefined, ...(answer === undefined ? {} : { text: answer }) };
   };
-  return { run, calls: () => calls, last: () => last };
+  return { run, calls: () => seen.length, all: () => seen };
 }
 
 try {
@@ -106,43 +112,101 @@ try {
     writeFileSync(join(root, "work.txt"), "x\n");
     gitC(root, "add", "work.txt");
     gitC(root, "commit", "-m", "work");
+    const head = gitC(root, "rev-parse", "HEAD");
     const fake = fakeAgent("bug: missing test");
     await reviewDrain(root, {
       artifactsDir: artifacts,
       runAgent: fake.run,
-      config: { model: "highland/deepseek-v4-flash", thinkingLevel: "high", concurrency: 4 },
+      config: { model: "highland/deepseek-v4-flash", thinkingLevel: "high", concurrency: 4, runner: "pi" },
     });
-    expectEqual("non-empty diff calls agent once", fake.calls(), 1);
-    const seen = fake.last();
-    expect("agent ran", seen);
-    expectEqual("review cwd is Main", seen?.cwd, root);
-    expectEqual("review ticket id", seen?.ticketId, "drain-review");
-    expectEqual("review role", seen?.role, "review");
-    expectEqual("review model from config", seen?.model, "highland/deepseek-v4-flash");
-    expectEqual("review thinkingLevel from config", seen?.thinkingLevel, "high");
-    expectEqual("review tools", seen?.tools, REVIEW_TOOLS);
-    expectEqual("review has no bash", seen?.useBash, false);
-    expectEqual("review wall", seen?.wallMs, REVIEW_WALL_MS);
-    expect("prompt pins range", seen?.prompt.includes(`${base}...HEAD`) === true);
-    expect("prompt has diff", seen?.prompt.includes("work.txt") === true);
-    expectEqual("bun writes last assistant text", readOut(artifacts), "bug: missing test\n");
+
+    expectEqual("one reviewer per axis", fake.calls(), REVIEW_AXES.length);
+    const seen = fake.all();
+    for (const [i, opts] of seen.entries()) {
+      const tag = `axis ${i + 1}`;
+      expectEqual(`${tag} cwd is Main`, opts.cwd, root);
+      expectEqual(`${tag} has its own session`, opts.ticketId, `drain-review-${i + 1}`);
+      expectEqual(`${tag} role`, opts.role, "review");
+      expectEqual(`${tag} model from config`, opts.model, "highland/deepseek-v4-flash");
+      expectEqual(`${tag} thinkingLevel from config`, opts.thinkingLevel, "high");
+      expectEqual(`${tag} runner from config`, opts.runner, "pi");
+      expectEqual(`${tag} tools`, opts.tools, REVIEW_TOOLS);
+      expectEqual(`${tag} may read git through bash`, opts.useBash, true);
+      expectEqual(`${tag} wall`, opts.wallMs, REVIEW_WALL_MS);
+      expect(`${tag} persona pins range`, opts.persona?.includes(`${base}...HEAD`) === true);
+      expect(`${tag} persona is this axis only`, opts.persona?.includes(`Your axis: ${REVIEW_AXES[i]}`) === true);
+      for (const [j, other] of REVIEW_AXES.entries()) {
+        if (j !== i) expect(`${tag} persona leaves axis ${j + 1} to others`, !opts.persona?.includes(other));
+      }
+      expect(
+        `${tag} message hands over the range, not the diff`,
+        opts.prompt.includes(`${base}...HEAD`) &&
+          opts.prompt.includes(`HEAD = ${head}`) &&
+          opts.prompt.includes("work") &&
+          !opts.prompt.includes("diff --git"),
+      );
+    }
+
+    const body = readOut(artifacts);
+    for (const [i, axis] of REVIEW_AXES.entries()) {
+      expect(`report heads axis ${i + 1}`, body.includes(`## ${i + 1}. ${axis}`));
+      expect(`axis ${i + 1} carries its findings`, section(body, i).includes("bug: missing test"));
+    }
+    expectEqual("three sections, one report", body.split(/^## /m).length - 1, REVIEW_AXES.length);
     expectEqual(
       "review session path",
-      ticketSessionFile(artifacts, "drain-review", "review"),
-      join(artifacts, "sessions", "drain-review", "review.jsonl"),
+      ticketSessionFile(artifacts, "drain-review-2", "review"),
+      join(artifacts, "sessions", "drain-review-2", "review.jsonl"),
     );
+
+    // The other runner gets the same contract, the same handover and the same message: only the
+    // mechanics behind opts.runner differ.
+    await reviewDrain(root, {
+      artifactsDir: artifacts,
+      runAgent: fake.run,
+      config: { model: undefined, thinkingLevel: "high", concurrency: 4, runner: "dsh" },
+    });
+    const dsh = fake.all().slice(REVIEW_AXES.length);
+    expectEqual("dsh review runner", dsh[0]?.runner, "dsh");
+    expect("one contract, two runners", dsh.every((o, i) => o.persona === seen[i]?.persona));
+    expect("same message either way", dsh.every((o, i) => o.prompt === seen[i]?.prompt));
   });
 
+  // A runner that hands its final message over does not need its session log read back.
+  await withTarget(async (root, artifacts) => {
+    await writeReviewBase(root, artifacts);
+    writeFileSync(join(root, "work.txt"), "y\n");
+    gitC(root, "add", "work.txt");
+    gitC(root, "commit", "-m", "work");
+    const fake = fakeAgent("text from the log", "text from the runner");
+    await reviewDrain(root, { artifactsDir: artifacts, runAgent: fake.run });
+    const body = readOut(artifacts);
+    expectEqual(
+      "the runner's own text wins",
+      REVIEW_AXES.map((_, i) => section(body, i).trim()),
+      REVIEW_AXES.map(() => "text from the runner"),
+    );
+    expect("no log text survives", !body.includes("text from the log"));
+  });
+
+  // One axis blowing up does not take the other two down: its own section carries the error.
   await withTarget(async (root, artifacts) => {
     await writeReviewBase(root, artifacts);
     writeFileSync(join(root, "work.txt"), "x\n");
     gitC(root, "add", "work.txt");
     gitC(root, "commit", "-m", "work");
-    const fake: AgentRunner = async () => {
-      throw new Error("boom");
+    const fake = fakeAgent("ok");
+    let calls = 0;
+    const flaky: AgentRunner = async (opts) => {
+      calls += 1;
+      if (calls === 2) throw new Error("boom");
+      return fake.run(opts);
     };
-    await reviewDrain(root, { artifactsDir: artifacts, runAgent: fake });
-    expectEqual("Pi throw is advisory", readOut(artifacts), "review error: boom\n");
+    await reviewDrain(root, { artifactsDir: artifacts, runAgent: flaky });
+    const body = readOut(artifacts);
+    expect("the failed axis reports its own error", section(body, 1).includes("review error: boom"));
+    expect("the other axes still report", section(body, 0).includes("ok") && section(body, 2).includes("ok"));
+    expect("a review error is still advisory", body.startsWith(`## 1. ${REVIEW_AXES[0]}`));
   });
 
   await withTarget(async (root, artifacts) => {
@@ -155,7 +219,12 @@ try {
       lastError: "Request timed out.",
     });
     await reviewDrain(root, { artifactsDir: artifacts, runAgent: fake });
-    expectEqual("lastError fallback", readOut(artifacts), "Request timed out.\n");
+    const body = readOut(artifacts);
+    expectEqual(
+      "lastError fallback",
+      REVIEW_AXES.map((_, i) => section(body, i).trim()),
+      REVIEW_AXES.map(() => "Request timed out."),
+    );
   });
 
   await withTarget(async (root) => {

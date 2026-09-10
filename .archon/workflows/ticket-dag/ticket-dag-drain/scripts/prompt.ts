@@ -1,4 +1,8 @@
+import { readFileSync } from "node:fs";
+import { homedir } from "node:os";
+import { join } from "node:path";
 import { STATUSES } from "./ticket-line.ts";
+import type { Runner } from "./config.ts";
 
 /** The Status vocabulary as the prompts spell it. */
 const STATUS_VALUES = STATUSES.map((s) => `\`${s}\``).join(" / ");
@@ -25,20 +29,21 @@ const CONFLICT_SKILL = `1. **See the current state** of the merge/rebase. Check 
 
 Leave the ticket file's \`Status:\` line unchanged (${STATUS_VALUES}). Those values are owned by \`/to-tickets\` and the Orchestrator, not by conflict resolution.`;
 
-export function implementPrompt(ticketRelPath: string): string {
-  return `${IMPLEMENT_SKILL}\n\n${ticketRelPath}\nThis ticket is not done. Implement the acceptance criteria in this worktree and commit the product-code changes on the current branch before exiting. Leave the ticket Status line unchanged.\n`;
+export function implementTask(ticketRelPath: string): string {
+  return `${ticketRelPath}\nThis ticket is not done. Implement the acceptance criteria in this worktree and commit the product-code changes on the current branch before exiting. Leave the ticket Status line unchanged.\n`;
 }
 
-export function conflictPrompt(ticketRelPath: string): string {
-  return `${CONFLICT_SKILL}\n\n${ticketRelPath}\n`;
+export function conflictTask(ticketRelPath: string): string {
+  return `${ticketRelPath}\n`;
 }
 
-// ponytail: the tdd skill body, inline. Only the loader metadata was dropped (pi scans it to decide
-// when to offer the skill; dsh has no scanner). The two pointers to further pi material survive as
-// conditional reads - that tree is exactly what pi itself keeps on-demand, and dsh has bash, so it
-// can read them when this machine ships them. Not inlined: ~/.pi/agent/skills/tdd/{tests,mocking}.md,
-// ~/.pi/agent/skills/codebase-design/ (and what it references), tdd/agents/openai.yaml (pi subagents).
-// Re-copy by hand if the skill changes.
+// ponytail: the tdd skill body, inline. This is the fallback for a machine with no pi skill tree;
+// where one exists, tddPersona() reads the skill itself and this copy is never used. Only the loader
+// metadata was dropped (pi scans it to decide when to offer the skill; dsh has no scanner), and the
+// pointer into the codebase-design tree is dropped on purpose: designing module interfaces belongs to
+// ticket writing, not to a node that executes a ticket, and it is dead prose for a runner with no
+// skill loader. Not inlined: ~/.pi/agent/skills/tdd/{tests,mocking}.md, tdd/agents/openai.yaml
+// (pi subagents). Re-copy by hand if the skill changes.
 const TDD_SKILL = `The tdd skill, in full:
 
 # Test-Driven Development
@@ -61,8 +66,6 @@ A **seam** is the public boundary you test at: the interface where you observe b
 
 Ask: "What's the public interface, and which seams should we test?"
 
-When the shape of that interface is itself in question — how deep the module is, where the seam belongs, what the interface should expose — read \`~/.pi/agent/skills/codebase-design/SKILL.md\` with bash if this machine has it: it is the shared source of the module, interface, depth, seam, adapter, leverage and locality terms, and it is a reference to consult, not a session to run.
-
 ## Anti-patterns
 
 - **Implementation-coupled** — mocks internal collaborators, tests private methods, or verifies through a side channel (querying the database instead of using the interface). The tell: the test breaks when you refactor but behavior hasn't changed.
@@ -75,13 +78,72 @@ When the shape of that interface is itself in question — how deep the module i
 - **One slice at a time.** One seam, one test, one minimal implementation per cycle.
 - **Refactoring is not part of the loop.** It belongs to the review stage, not the red → green implementation cycle.`;
 
-/** The skill body that a persona-taking runner (dsh) puts in its system prompt. Pi carries it in the message. */
-export function personaFor(role: "implement" | "conflict"): string {
-  return role === "implement" ? `${IMPLEMENT_SKILL}\n\n${TDD_SKILL}` : CONFLICT_SKILL;
+/** Where the tdd skill lives: the same tree pi's own loader reads. */
+const TDD_DIR = join(homedir(), ".pi", "agent", "skills", "tdd");
+
+/**
+ * The dsh implement persona carries the tdd skill's own body, read at run time from the tree pi's
+ * loader uses, so the two runners cannot disagree about the skill and nothing is re-copied by hand.
+ * Pi needs none of this: its session prompt advertises the skill catalog and its read tool opens the
+ * file. The inlined TDD_SKILL is the fallback for a machine with no pi skill tree.
+ */
+function tddPersona(): string {
+  try {
+    const body = readFileSync(join(TDD_DIR, "SKILL.md"), "utf8")
+      .replace(/^---\n[\s\S]*?\n---\n/, "")
+      .split("\n\n")
+      .filter((para) => !para.includes("codebase-design"))
+      .join("\n\n")
+      .trim();
+    if (!body) return TDD_SKILL;
+    return `The tdd skill, in full, from ${TDD_DIR}. Its siblings tests.md and mocking.md live in that directory: read either with bash when the test needs it.\n\n${body}`;
+  } catch {
+    return TDD_SKILL;
+  }
 }
 
-/** The task half of a composed prompt: drop the skill body that the persona already carries. */
-export function taskTextOf(role: "implement" | "conflict", prompt: string): string {
-  const skill = role === "implement" ? IMPLEMENT_SKILL : CONFLICT_SKILL;
-  return prompt.startsWith(skill) ? prompt.slice(skill.length).trimStart() : prompt;
+/** The skill body a persona-taking runner puts in its system prompt. */
+export function personaFor(role: "implement" | "conflict", runner: Runner | undefined): string {
+  if (role === "conflict") return CONFLICT_SKILL;
+  return runner === "dsh" ? `${IMPLEMENT_SKILL}\n\n${tddPersona()}` : IMPLEMENT_SKILL;
+}
+
+/** The three axes the drain-end review fans out on: one reviewer each, one report. */
+export const REVIEW_AXES = [
+  "Bugs and incorrect assumptions in the diff",
+  "Missing tests for changed behavior",
+  "Cross-file breakage (callers, contracts, tickets interacting)",
+] as const;
+
+const BASE_READ_COMMANDS =
+  "`git log`, `git diff`, `git show`, `cat`, `rg` and your file tools";
+
+/**
+ * The review contract, one text for every runner. Reviewers are handed the range and the tools, not
+ * a pasted diff: they fetch what they need themselves. Pi's review session is read-only by
+ * instruction too - it gets bash so it can read git history, which is worth more than the allowlist
+ * that used to make writing impossible.
+ */
+export function reviewPersona(base: string, axis: string): string {
+  return `You are a read-only reviewer of git range ${base}...HEAD on this repository.
+
+Inspect that range yourself, read-only: ${BASE_READ_COMMANDS} are yours. Never write: no edits, no commits, no output redirection into files, no mutating git commands. Do not spawn agents or invoke /code-review or /tdd.
+
+Report only issues in added or modified lines, plus the impact of those changes on other files.
+
+Your axis: ${axis}. Other reviewers cover the other axes - do not report them.
+
+Do not check ticket acceptance criteria. Do not produce a Standards-vs-Spec pair.
+
+If nothing material on your axis, say so briefly. Markdown. Under 800 words.`;
+}
+
+/** The handover: which range, and the commit menu to orient with. The diff itself is not pasted. */
+export function reviewTask(base: string, head: string, log: string): string {
+  return `Review the range ${base}...HEAD (HEAD = ${head}) in this repository.\n\nCommits in that range:\n${log || "(none)"}\n`;
+}
+
+/** How a runner that carries everything in one message sees a persona plus its task. */
+export function composeMessage(persona: string, task: string): string {
+  return `${persona}\n\n${task}`;
 }

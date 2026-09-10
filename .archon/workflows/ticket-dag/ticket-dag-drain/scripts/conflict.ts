@@ -1,7 +1,7 @@
 import { existsSync } from "node:fs";
 import { join } from "node:path";
 import { defaultAgent, type AgentRunner, type TicketAgentOpts } from "./agent.ts";
-import { conflictPrompt } from "./prompt.ts";
+import { conflictTask, personaFor } from "./prompt.ts";
 import { ticketSessionFile } from "./session-log.ts";
 import { syncWorktreeEnv } from "./worktree-env.ts";
 import { loadConfig, type PackConfig } from "./config.ts";
@@ -43,7 +43,8 @@ export async function conflictTicket(
       model: config.model,
       thinkingLevel: config.thinkingLevel,
       runner: config.runner,
-      prompt: conflictPrompt(ticket.relPath),
+      persona: personaFor("conflict", config.runner),
+      prompt: conflictTask(ticket.relPath),
     });
     return settleAfterConflict(target, ticket, worktree, pi.lastError);
   } catch (e) {

@@ -6,6 +6,6 @@ Implement prompt is the short implement SKILL body plus leave `Status:` unchange
 
 This is pack-only. The Orchestrator still uses `/skill:implement` without stuffing review into the prompt (ADR-0003).
 
-Supersedes ADR-0035.
+Supersedes ADR-0035. Superseded by ADR-0038: three reviewers, one per axis, handed the range and the tools instead of a pasted diff.
 
 Rejected: per-ticket two-axis in implement; unattended `/code-review`; one Spec agent on a mixed multi-ticket diff; failing the drain on findings; installing pr-review, CodeRabbit, Copilot review, Bugbot, Greptile, Qodo, earendil pi-review, or the Anthropic `/code-review` plugin.

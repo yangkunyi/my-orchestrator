@@ -2,6 +2,7 @@ import { existsSync, mkdirSync, writeFileSync } from "node:fs";
 import { dirname } from "node:path";
 import { AGENT_WALL_MS, armSessionAbort, type PackAgentOpts, type PackAgentResult } from "./agent.ts";
 import { lastAssistantError, ticketSessionFile } from "./session-log.ts";
+import { composeMessage } from "./prompt.ts";
 import { prependVenvBin } from "./worktree-env.ts";
 
 export async function runPackPi(opts: PackAgentOpts): Promise<PackAgentResult> {
@@ -75,7 +76,7 @@ export async function runPackPi(opts: PackAgentOpts): Promise<PackAgentResult> {
   );
   try {
     try {
-      await session.prompt(opts.prompt);
+      await session.prompt(opts.persona ? composeMessage(opts.persona, opts.prompt) : opts.prompt);
     } catch (e) {
       const file = sessionManager.getSessionFile() ?? sessionFile;
       const msg = e instanceof Error ? e.message : String(e);

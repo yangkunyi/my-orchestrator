@@ -3,17 +3,17 @@
 import { mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { AGENT_WALL_MS, armSessionAbort, noopAgent } from "../scripts/agent.ts";
-import { conflictPrompt, implementPrompt } from "../scripts/prompt.ts";
+import { composeMessage, conflictTask, implementTask, personaFor, REVIEW_AXES, reviewPersona, reviewTask } from "../scripts/prompt.ts";
 import { proxyEnv } from "../scripts/proxy.ts";
 import { lastAssistantError, lastAssistantText, ticketSessionFile } from "../scripts/session-log.ts";
-import { REVIEW_TOOLS, REVIEW_WALL_MS, reviewPrompt } from "../scripts/review.ts";
+import { REVIEW_TOOLS, REVIEW_WALL_MS } from "../scripts/review.ts";
 import { expect, expectEqual, mkTemp, sleep } from "./target.ts";
 
 const executeYaml = join(import.meta.dir, "../../ticket-dag-execute/ticket-dag-execute.yaml");
 const drainYaml = join(import.meta.dir, "../ticket-dag-drain.yaml");
 
 try {
-  const impl = implementPrompt(".scratch/feat/issues/01-demo.md");
+  const impl = composeMessage(personaFor("implement", "pi"), implementTask(".scratch/feat/issues/01-demo.md"));
   expect("implement inlines skill body", impl.includes("Use /tdd where possible, at pre-agreed seams."));
   expect("implement has ticket path", impl.includes(".scratch/feat/issues/01-demo.md"));
   expect("implement leaves Status unchanged", impl.includes("Leave the ticket file's `Status:` line unchanged"));
@@ -22,7 +22,7 @@ try {
   expect("implement drops /code-review", !impl.includes("/code-review"));
   expect("implement has no two-axis fanout", !impl.includes("diff-reviewer") && !impl.includes("## Standards"));
 
-  const conf = conflictPrompt(".scratch/feat/issues/01-demo.md");
+  const conf = composeMessage(personaFor("conflict", "pi"), conflictTask(".scratch/feat/issues/01-demo.md"));
   expect("conflict inlines skill body", conf.includes("Always resolve; never `--abort`."));
   expect("conflict has ticket path", conf.includes(".scratch/feat/issues/01-demo.md"));
   expect("conflict leaves Status unchanged", conf.includes("Leave the ticket file's `Status:` line unchanged"));
@@ -43,8 +43,8 @@ try {
     );
     expectEqual(
       "review session path",
-      ticketSessionFile(artifacts, "drain-review", "review"),
-      join(artifacts, "sessions", "drain-review", "review.jsonl"),
+      ticketSessionFile(artifacts, "drain-review-1", "review"),
+      join(artifacts, "sessions", "drain-review-1", "review.jsonl"),
     );
     expect(
       "sessions are under artifacts not Run records",
@@ -93,14 +93,41 @@ try {
   expect("wall clock shorter than Archon timeout", AGENT_WALL_MS < 7_500_000);
   expectEqual("review wall 30 min", REVIEW_WALL_MS, 30 * 60 * 1000);
   expect("review wall shorter than review node timeout", REVIEW_WALL_MS < 2_000_000);
-  expectEqual("review tools are read-only", REVIEW_TOOLS, ["read", "grep", "find", "ls"]);
+  expectEqual("review tools can read git", REVIEW_TOOLS, ["read", "grep", "find", "ls", "bash"]);
 
-  const rp = reviewPrompt("abc", "c1", "+foo");
+  const rp = composeMessage(
+    reviewPersona("abc", REVIEW_AXES[0]),
+    reviewTask("abc", "head1", "c1 do a thing\n"),
+  );
   expect("review prompt pins range", rp.includes("abc...HEAD"));
-  expect("review forbids /code-review", rp.includes("Do not edit, commit, spawn agents, or invoke /code-review"));
+  expect("review is handed HEAD", rp.includes("HEAD = head1"));
+  expect("review forbids /code-review", rp.includes("Do not spawn agents or invoke /code-review"));
   expect("review forbids Spec axis", rp.includes("Do not produce a Standards-vs-Spec pair"));
   expect("review has no two-axis recipe", !rp.includes("## Standards") && !rp.includes("diff-reviewer"));
   expect("review is not ticket Spec", rp.includes("Do not check ticket acceptance criteria"));
+  expect("review carries the commit menu", rp.includes("Commits in that range:\nc1 do a thing"));
+  expect("review pastes no diff", !rp.includes("```diff") && !rp.includes("truncated"));
+  expect(
+    "review is one axis only",
+    rp.includes(`Your axis: ${REVIEW_AXES[0]}`) && !rp.includes(REVIEW_AXES[1]),
+  );
+
+  // One contract either way: the tools differ per runner, the text does not.
+  expect("review rules out writes", rp.includes("Never write:") && rp.includes("no commits"));
+  expect("review names no Pi tool line", !rp.includes("Use read, grep, find, and ls only"));
+  expect("review knows it may read git", rp.includes("git log") && rp.includes("git show"));
+  expectEqual(
+    "every axis gets its own contract",
+    new Set(REVIEW_AXES.map((axis) => reviewPersona("abc", axis))).size,
+    REVIEW_AXES.length,
+  );
+  expect("Pi implement persona is the skill alone", !personaFor("implement", "pi").includes("Red before green."));
+  expect("dsh implement persona carries the tdd body", personaFor("implement", "dsh").includes("Red before green."));
+  expect(
+    "dsh implement persona drops the codebase-design pointer",
+    !personaFor("implement", "dsh").includes("codebase-design"),
+  );
+  expect("both implement personas stay the same skill", personaFor("implement", "pi").startsWith("Implement the work described by the user"));
 
   const yaml = readFileSync(executeYaml, "utf8");
   expect("implement node timeout 7500000", /id: implement[\s\S]*?timeout: 7500000/.test(yaml));

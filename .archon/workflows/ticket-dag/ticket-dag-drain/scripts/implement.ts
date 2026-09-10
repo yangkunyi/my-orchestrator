@@ -2,7 +2,7 @@ import { defaultAgent, type AgentRunner, type TicketAgentOpts } from "./agent.ts
 import { beginTicket } from "./begin.ts";
 import { loadConfig, type PackConfig } from "./config.ts";
 import { runNode } from "./node-entry.ts";
-import { implementPrompt } from "./prompt.ts";
+import { implementTask, personaFor } from "./prompt.ts";
 import { ticketSessionFile } from "./session-log.ts";
 import { fail, settleAfterAgent, type SettleResult } from "./settle.ts";
 import { scanTickets } from "./tickets.ts";
@@ -30,7 +30,8 @@ export async function implementTicket(
       model: config.model,
       thinkingLevel: config.thinkingLevel,
       runner: config.runner,
-      prompt: implementPrompt(ticket.relPath),
+      persona: personaFor("implement", config.runner),
+      prompt: implementTask(ticket.relPath),
     });
     return settleAfterAgent(target, ticket, begun.worktree, pi.lastError);
   } catch (e) {
