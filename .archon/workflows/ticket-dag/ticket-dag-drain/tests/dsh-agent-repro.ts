@@ -6,6 +6,7 @@
 import { chmodSync, existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { dshAgent } from "../scripts/dsh-agent.ts";
+import type { ThinkingLevel } from "../scripts/config.ts";
 import { implementPrompt } from "../scripts/prompt.ts";
 import { expect, expectEqual, expectReject, mkTemp, runScript } from "./target.ts";
 
@@ -90,14 +91,14 @@ process.env.DEEPSEEK_BASE_URL = "https://gateway.invalid/v1";
 process.env.DEEPSEEK_API_KEY = "test-key";
 process.env.STUB_SEEN = seen;
 
-const run = (role: "implement" | "conflict", prompt: string, model?: string) =>
+const run = (role: "implement" | "conflict", prompt: string, model?: string, level: ThinkingLevel = "high") =>
   dshAgent({
     cwd: work,
     artifactsDir: work,
     ticketId: "feat/01",
     role,
     model,
-    thinkingLevel: "high",
+    thinkingLevel: level,
     prompt,
   });
 
@@ -110,10 +111,12 @@ try {
   expectEqual("DSH_HOME is passed through", got.home, home);
   expectEqual("gateway from the environment", got.baseUrl, "https://gateway.invalid/v1");
   expect("persona carries the implement skill", got.persona.includes("Implement the work described by the user"));
-  expect("persona carries the tdd note", got.persona.includes("TDD:"));
+  expect("persona carries the tdd rules", got.persona.includes("Red before green."));
+  expect("persona carries the seams rule", got.persona.includes("Test only at pre-agreed seams."));
   expectEqual("initialize cwd", got.initialize.cwd, work);
   expectEqual("initialize provider", got.initialize.provider, "deepseek-official");
   expectEqual("initialize model defaults", got.initialize.model, "deepseek-flash");
+  expectEqual("initialize effort from thinkingLevel", got.initialize.reasoningEffort, "high");
   expect("session id is ours", String(got.prompt.sessionId).startsWith("session-"));
   const text = got.prompt.contentBlocks[0].text as string;
   expect("message carries the task", text.includes("tickets/01-demo.md"));
@@ -133,6 +136,18 @@ try {
     () => run("review" as unknown as "conflict", "review the diff"),
     /does not serve the review node/,
   );
+
+  for (const [level, effort] of [
+    ["off", "off"],
+    ["minimal", "low"],
+    ["medium", "high"],
+    ["xhigh", "high"],
+    ["max", "max"],
+  ] as const) {
+    await run("conflict", "resolve the conflict", undefined, level);
+    const mapped = JSON.parse(readFileSync(seen, "utf8")) as Record<string, any>;
+    expectEqual(`thinkingLevel ${level} maps to effort ${effort}`, mapped.initialize.reasoningEffort, effort);
+  }
 
   delete process.env.DEEPSEEK_BASE_URL;
   delete process.env.DEEPSEEK_API_KEY;

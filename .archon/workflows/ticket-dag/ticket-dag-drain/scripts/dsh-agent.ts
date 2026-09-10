@@ -15,11 +15,22 @@ import { homedir } from "node:os";
 import { join } from "node:path";
 import { createInterface } from "node:readline";
 import { AGENT_WALL_MS, type PackAgentOpts, type PackAgentResult } from "./agent.ts";
+import type { ThinkingLevel } from "./config.ts";
 import { personaFor, taskTextOf } from "./prompt.ts";
 
 const PROFILE = "sdk-minimal";
 const PROVIDER = "deepseek-official";
 const DEFAULT_MODEL = "deepseek-flash";
+/** dsh's deepseek llm plugin knows exactly four efforts; Pi's seven levels fold onto them. */
+const EFFORT: Record<ThinkingLevel, string> = {
+  off: "off",
+  minimal: "low",
+  low: "low",
+  medium: "high",
+  high: "high",
+  xhigh: "high",
+  max: "max",
+};
 const DEFAULT_DSH_HOME = join(homedir(), ".dsh-pack");
 const INIT_TIMEOUT_MS = 60_000;
 const PROMPT_TIMEOUT_MS = 60_000;
@@ -74,7 +85,12 @@ class DshRuntime {
   private ended: string | undefined;
   private closed = false;
 
-  constructor(private readonly cwd: string, env: NodeJS.ProcessEnv, private readonly model: string) {
+  constructor(
+    private readonly cwd: string,
+    env: NodeJS.ProcessEnv,
+    private readonly model: string,
+    private readonly effort: string,
+  ) {
     this.sessionId = `session-${crypto.randomUUID().replace(/-/g, "")}`;
     this.child = spawn(process.env.DSH_BIN?.trim() || "dsh", ["--profile", PROFILE], {
       cwd,
@@ -162,7 +178,11 @@ class DshRuntime {
 
   /** Send the turn and resolve once the session reports idle after it started. */
   async run(promptText: string): Promise<void> {
-    await this.request("initialize", { cwd: this.cwd, provider: PROVIDER, model: this.model }, INIT_TIMEOUT_MS);
+    await this.request(
+      "initialize",
+      { cwd: this.cwd, provider: PROVIDER, model: this.model, reasoningEffort: this.effort },
+      INIT_TIMEOUT_MS,
+    );
     const idle = new Promise<void>((resolve, reject) => {
       this.idle = { resolve, reject };
     });
@@ -207,9 +227,8 @@ export async function dshAgent(opts: PackAgentOpts): Promise<PackAgentResult> {
   const role = opts.role;
   const creds = credentials();
   const dshHome = process.env.DSH_HOME?.trim() || DEFAULT_DSH_HOME;
-  // ponytail: thinkingLevel is not mapped onto dsh's reasoningEffort (dsh defaults to "high"), and
-  // tools/useBash are ignored - the minimal tree is fixed at one persistent bash tool. Map them when
-  // a run actually needs a different effort or tool set.
+  // ponytail: tools and useBash are ignored - the minimal tree is fixed at one persistent bash tool.
+  // Add them to a patch/profile layer if a node ever needs a different tool set.
   const rt = new DshRuntime(
     opts.cwd,
     {
@@ -220,6 +239,7 @@ export async function dshAgent(opts: PackAgentOpts): Promise<PackAgentResult> {
       DSH_SYSTEM_PROMPT: personaFor(role),
     },
     opts.model?.trim() || creds.model || DEFAULT_MODEL,
+    EFFORT[opts.thinkingLevel],
   );
   const wallMs = opts.wallMs ?? AGENT_WALL_MS;
   let aborted = false;
