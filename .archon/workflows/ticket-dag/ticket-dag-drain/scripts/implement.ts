@@ -29,6 +29,7 @@ export async function implementTicket(
       role: "implement",
       model: config.model,
       thinkingLevel: config.thinkingLevel,
+      runner: config.runner,
       prompt: implementPrompt(ticket.relPath),
     });
     return settleAfterAgent(target, ticket, begun.worktree, pi.lastError);

@@ -42,6 +42,7 @@ export async function conflictTicket(
       role: "conflict",
       model: config.model,
       thinkingLevel: config.thinkingLevel,
+      runner: config.runner,
       prompt: conflictPrompt(ticket.relPath),
     });
     return settleAfterConflict(target, ticket, worktree, pi.lastError);

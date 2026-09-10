@@ -1,4 +1,4 @@
-import type { PackConfig, ThinkingLevel } from "./config.ts";
+import type { PackConfig, Runner, ThinkingLevel } from "./config.ts";
 import { ticketSessionFile } from "./session-log.ts";
 
 export type AgentRole = "implement" | "conflict" | "review";
@@ -13,6 +13,8 @@ export type PackAgentOpts = {
   role: AgentRole;
   model: string | undefined;
   thinkingLevel: ThinkingLevel;
+  /** Which runtime to spend on this node. Defaults to pi; only Pi serves the review node. */
+  runner?: Runner;
   prompt: string;
   tools?: string[];
   useBash?: boolean;
@@ -45,6 +47,10 @@ export async function noopAgent(opts: PackAgentOpts): Promise<PackAgentResult> {
 }
 
 export async function defaultAgent(opts: PackAgentOpts): Promise<PackAgentResult> {
+  if (opts.runner === "dsh") {
+    const { dshAgent } = await import("./dsh-agent.ts");
+    return dshAgent(opts);
+  }
   const { runPackPi } = await import("./pi-session.ts");
   return runPackPi(opts);
 }

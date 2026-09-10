@@ -13,6 +13,7 @@ try {
     model: undefined,
     thinkingLevel: "high",
     concurrency: 4,
+    runner: "pi",
   });
 
   writeFileSync(
@@ -23,6 +24,7 @@ try {
     model: undefined,
     thinkingLevel: "high",
     concurrency: 4,
+    runner: "pi",
   });
 
   writeFileSync(
@@ -33,6 +35,7 @@ try {
     model: undefined,
     thinkingLevel: "high",
     concurrency: 4,
+    runner: "pi",
   });
 
   writeFileSync(
@@ -43,6 +46,15 @@ try {
     model: "from-file",
     thinkingLevel: "low",
     concurrency: 2,
+    runner: "pi",
+  });
+
+  writeFileSync(join(root, ".scratch/ticket-dag.yaml"), "runner: dsh\n");
+  expectEqual("runner: dsh", loadConfig(root), {
+    model: undefined,
+    thinkingLevel: "high",
+    concurrency: 4,
+    runner: "dsh",
   });
 
   const other = join(root, "other.yaml");
@@ -51,11 +63,13 @@ try {
     model: "from-other",
     thinkingLevel: "medium",
     concurrency: 8,
+    runner: "pi",
   });
   expectEqual("relative config path", loadConfig(root, "other.yaml"), {
     model: "from-other",
     thinkingLevel: "medium",
     concurrency: 8,
+    runner: "pi",
   });
 
   writeFileSync(join(root, ".scratch/ticket-dag.yaml"), "thinkingLevel: nope\n");
@@ -63,6 +77,9 @@ try {
 
   writeFileSync(join(root, ".scratch/ticket-dag.yaml"), "thinkingLevel: 1\n");
   expectThrow("thinkingLevel number", () => loadConfig(root), /invalid thinkingLevel/);
+
+  writeFileSync(join(root, ".scratch/ticket-dag.yaml"), "runner: nope\n");
+  expectThrow("invalid runner", () => loadConfig(root), /invalid runner/);
 
   writeFileSync(join(root, ".scratch/ticket-dag.yaml"), "concurrency: 0\n");
   expectThrow("concurrency 0", () => loadConfig(root), /invalid concurrency/);

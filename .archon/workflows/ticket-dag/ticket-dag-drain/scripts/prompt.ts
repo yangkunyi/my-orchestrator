@@ -32,3 +32,19 @@ export function implementPrompt(ticketRelPath: string): string {
 export function conflictPrompt(ticketRelPath: string): string {
   return `${CONFLICT_SKILL}\n\n${ticketRelPath}\n`;
 }
+
+// ponytail: the dsh minimal tree ships one persistent bash tool and no skill loader, so a `/tdd`
+// reference cannot resolve there. This points at the skill file when the Target has one, and states
+// the rules it stands for when it does not - no vendored copy of the skill body to keep in sync.
+const TDD_NOTE = `TDD: read ~/.pi/agent/skills/tdd/SKILL.md with bash if it exists, and follow it; otherwise work red -> green, and test behavior only at pre-agreed seams.`;
+
+/** The skill body that a persona-taking runner (dsh) puts in its system prompt. Pi carries it in the message. */
+export function personaFor(role: "implement" | "conflict"): string {
+  return role === "implement" ? `${IMPLEMENT_SKILL}\n\n${TDD_NOTE}` : CONFLICT_SKILL;
+}
+
+/** The task half of a composed prompt: drop the skill body that the persona already carries. */
+export function taskTextOf(role: "implement" | "conflict", prompt: string): string {
+  const skill = role === "implement" ? IMPLEMENT_SKILL : CONFLICT_SKILL;
+  return prompt.startsWith(skill) ? prompt.slice(skill.length).trimStart() : prompt;
+}
