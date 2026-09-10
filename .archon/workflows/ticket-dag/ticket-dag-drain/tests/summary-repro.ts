@@ -3,7 +3,7 @@
 import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { type AgentRunner, type PackAgentOpts } from "../scripts/agent.ts";
-import { REVIEW_AXES } from "../scripts/prompt.ts";
+import { REVIEW_AXES, summaryPersona } from "../scripts/prompt.ts";
 import { reviewDrain } from "../scripts/review.ts";
 import {
   REVIEW_BASE_REL,
@@ -115,11 +115,22 @@ try {
     expect("summary persona pins range", seen?.persona?.includes(`${base}...HEAD`) === true);
     expect("summary persona merges, not reviews", seen?.persona?.includes("you rank and merge, you do not review") === true);
     expect("summary persona names what it dropped", seen?.persona?.includes("Nothing disappears silently") === true);
+    // The summary's "merge these N" rule reads the axis owner, not a literal: the count and the
+    // section it names come from REVIEW_AXES, so a fourth axis cannot leave the summary told to merge
+    // three.
+    expect(
+      "summary merges the owner's axes, not a literal count",
+      seen?.persona?.includes(`summarizing ${REVIEW_AXES.length} independent read-only reviews`) === true &&
+        seen?.persona?.includes(`Merge the ${REVIEW_AXES.length} reviews into one report:`) === true,
+    );
+    // The word "three" is gone: the count is the owner's length, so a fourth axis cannot leave the
+    // summary told to merge three.
+    expect("summary spells the count, not the word three", !summaryPersona("abc").includes("three"));
     expect(
       "summary task carries range, menu and reviews",
       seen?.prompt.includes(`${base}...HEAD`) === true &&
         seen?.prompt.includes(`HEAD = ${head}`) === true &&
-        seen?.prompt.includes("The three reviews (review.md):") === true &&
+        seen?.prompt.includes(`The ${REVIEW_AXES.length} reviews (review.md):`) === true &&
         seen?.prompt.includes(`## 3. ${REVIEW_AXES[2]}`) === true,
     );
     expectEqual("the runner's own text wins", readOut(artifacts), "summary from the runner\n");

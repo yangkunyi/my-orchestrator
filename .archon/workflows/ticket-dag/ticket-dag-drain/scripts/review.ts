@@ -4,7 +4,7 @@ import { defaultAgent, type AgentRunner, type TicketAgentOpts } from "./agent.ts
 import { loadConfig } from "./config.ts";
 import { git } from "./git.ts";
 import { runNode } from "./node-entry.ts";
-import { reviewTask, REVIEW_AXES } from "./prompt.ts";
+import { axisHeading, reviewAxes, reviewTask } from "./prompt.ts";
 import {
   readReviewBase,
   REVIEW_MD_REL,
@@ -48,12 +48,12 @@ export async function reviewDrain(target: string, opts: TicketAgentOpts): Promis
   const config = opts.config ?? loadConfig(target);
   const runAgent: AgentRunner = opts.runAgent ?? defaultAgent;
   const sections = await Promise.all(
-    REVIEW_AXES.map(async (axis, i) => {
-      const title = `${i + 1}. ${axis}`;
+    reviewAxes().map(async (axis) => {
+      const heading = axisHeading(axis);
       try {
         const agent = roleAgent({
           role: "review",
-          args: { axisIndex: i, base, axis },
+          args: { axisIndex: axis.index, base, axis: axis.title },
           cwd: target,
           artifactsDir: opts.artifactsDir,
           config,
@@ -63,14 +63,14 @@ export async function reviewDrain(target: string, opts: TicketAgentOpts): Promis
         // The runner's own final message first: reading it back out of a session log is the fallback for
         // a runner that does not hand one over (Pi writes its turn into the file it already owns).
         const text = r.text ?? lastAssistantText(r.sessionFile) ?? r.lastError ?? "(no review text)";
-        return { title, body: text.trim() };
+        return { heading, body: text.trim() };
       } catch (e) {
         const msg = e instanceof Error ? e.message : String(e);
-        return { title, body: reviewErrorText(msg) };
+        return { heading, body: reviewErrorText(msg) };
       }
     }),
   );
-  writeArtifact(outFile, sections.map((s) => `## ${s.title}\n\n${s.body}\n`).join("\n"));
+  writeArtifact(outFile, sections.map((s) => `${s.heading}\n\n${s.body}\n`).join("\n"));
 }
 
 export async function runReviewCli(): Promise<void> {

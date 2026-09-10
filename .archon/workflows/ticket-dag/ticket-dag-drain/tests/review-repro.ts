@@ -3,7 +3,7 @@
 import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { type AgentRunner, type PackAgentOpts } from "../scripts/agent.ts";
-import { REVIEW_AXES } from "../scripts/prompt.ts";
+import { axisHeading, REVIEW_AXES } from "../scripts/prompt.ts";
 import { roleSessionFile } from "../scripts/session-log.ts";
 import { rematchLeftovers } from "../scripts/rematch.ts";
 import { reviewDrain } from "../scripts/review.ts";
@@ -99,6 +99,9 @@ try {
   );
   expectEqual("a report is not a skip", reviewSkipReason(`## 1. ${REVIEW_AXES[0]}\n\nfindings\n`), null);
   expectEqual("an empty review.md is not a skip", reviewSkipReason("\n"), null);
+  // The axis owner spells the review.md section once: `## <n>. <title>`. The fan-out and summary read
+  // the same owner, so the byte format lives here as a literal rather than in review.ts.
+  expectEqual("the section heading is one spelling", axisHeading({ index: 2, title: "X" }), "## 3. X");
   // The P1's shape: the bare sentence review.ts used to write must still read as a report, so the
   // skip vocabulary is what separates the two cases rather than the wording around it.
   expectEqual(
