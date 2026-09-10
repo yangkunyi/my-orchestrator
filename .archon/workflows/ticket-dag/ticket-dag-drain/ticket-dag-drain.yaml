@@ -1,0 +1,18 @@
+name: ticket-dag-drain
+description: |
+  Drain implementation Tickets on this Target. Copy the ticket-dag pack
+  folder to ~/.archon/workflows/ (copy, not a symlink). Target does not
+  commit .archon/.
+worktree:
+  enabled: false
+inputs:
+  config:
+    default: .scratch/ticket-dag.yaml
+    description: Path to YAML with model, thinkingLevel, concurrency
+nodes:
+  - id: rematch
+    script: rematch
+    runtime: bun
+    always_run: true
+    with:
+      config: $INPUTS.config
