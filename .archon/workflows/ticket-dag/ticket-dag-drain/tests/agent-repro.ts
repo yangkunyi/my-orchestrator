@@ -2,17 +2,10 @@
 /** Temp-Target repro: pack Pi SDK wiring without a live session. No Archon engine, no repo src/. */
 import { mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import {
-  AGENT_WALL_MS,
-  armSessionAbort,
-  conflictPrompt,
-  implementPrompt,
-  lastAssistantError,
-  lastAssistantText,
-  noopAgent,
-  proxyEnv,
-  ticketSessionFile,
-} from "../scripts/agent.ts";
+import { AGENT_WALL_MS, armSessionAbort, noopAgent } from "../scripts/agent.ts";
+import { conflictPrompt, implementPrompt } from "../scripts/prompt.ts";
+import { proxyEnv } from "../scripts/proxy.ts";
+import { lastAssistantError, lastAssistantText, ticketSessionFile } from "../scripts/session-log.ts";
 import { REVIEW_TOOLS, REVIEW_WALL_MS, reviewPrompt } from "../scripts/review.ts";
 import { expect, expectEqual, mkTemp, sleep } from "./target.ts";
 

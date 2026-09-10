@@ -2,11 +2,8 @@
 /** Temp-Target repro: drain-end review node. Fake agent, no live Pi, no Archon engine, no repo src/. */
 import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
-import {
-  ticketSessionFile,
-  type AgentRunner,
-  type PackAgentOpts,
-} from "../scripts/agent.ts";
+import { type AgentRunner, type PackAgentOpts } from "../scripts/agent.ts";
+import { ticketSessionFile } from "../scripts/session-log.ts";
 import { rematchLeftovers } from "../scripts/rematch.ts";
 import {
   REVIEW_BASE_REL,

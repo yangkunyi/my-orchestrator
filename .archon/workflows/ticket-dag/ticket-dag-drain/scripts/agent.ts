@@ -48,12 +48,3 @@ export async function defaultAgent(opts: PackAgentOpts): Promise<PackAgentResult
   const { runPackPi } = await import("./pi-session.ts");
   return runPackPi(opts);
 }
-
-/*
- * ponytail: compatibility re-exports. tests/agent-repro.ts and tests/review-repro.ts import these
- * names from here, and the tests refactor owns tests/. Delete this block and point those two test
- * imports at prompt.ts / session-log.ts / proxy.ts to finish the split.
- */
-export { implementPrompt, conflictPrompt } from "./prompt.ts";
-export { lastAssistantError, lastAssistantText, ticketSessionFile } from "./session-log.ts";
-export { proxyEnv, reexecForProxy } from "./proxy.ts";
