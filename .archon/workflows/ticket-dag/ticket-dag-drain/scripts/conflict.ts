@@ -6,6 +6,7 @@ import { roleAgent } from "./roles.ts";
 import { syncWorktreeEnv } from "./worktree-env.ts";
 import { loadConfig, type PackConfig } from "./config.ts";
 import { runNode } from "./node-entry.ts";
+import { nodeLine } from "./node-outcomes.ts";
 import { fail, settleAfterConflict } from "./settle.ts";
 import { stamp, withMergeLock } from "./main-writes.ts";
 import { scanTickets } from "./tickets.ts";
@@ -57,7 +58,7 @@ export async function runConflictCli(): Promise<void> {
     artifacts: true,
     proxy: true,
     run: async ({ target, ticketId, artifactsDir, config }) =>
-      `${await conflictTicket(target, ticketId, { artifactsDir, config })}\n`,
+      nodeLine(await conflictTicket(target, ticketId, { artifactsDir, config })),
   });
 }
 

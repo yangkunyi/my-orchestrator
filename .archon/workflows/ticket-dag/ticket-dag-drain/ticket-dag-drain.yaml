@@ -33,6 +33,8 @@ nodes:
           with:
             config: $INPUTS.config
           fan_out:
+            # The throttle is config.concurrency: pick prints at most that many Ticket ids, so this
+            # launches the batch the pool can take, not everything that is startable.
             items: "$pick.output"
             as: ticket
             join: all_done

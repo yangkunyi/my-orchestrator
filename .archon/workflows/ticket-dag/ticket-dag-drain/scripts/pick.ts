@@ -1,6 +1,7 @@
 import { addAttempted, readAttempted } from "./attempted.ts";
 import { hasTicketMergeCommit, stamp, withMergeLock } from "./main-writes.ts";
 import { runNode } from "./node-entry.ts";
+import { nodeLine } from "./node-outcomes.ts";
 import { blockersMerged, byId, scanTickets, type Ticket } from "./tickets.ts";
 
 export type PickOpts = {
@@ -47,7 +48,7 @@ if (import.meta.main) {
     artifacts: true,
     run: async ({ target, artifactsDir, config }) => {
       const picked = await pickStartable(target, { concurrency: config.concurrency, artifactsDir });
-      return JSON.stringify(picked.map((t) => t.id));
+      return nodeLine(JSON.stringify(picked.map((t) => t.id)));
     },
   });
 }

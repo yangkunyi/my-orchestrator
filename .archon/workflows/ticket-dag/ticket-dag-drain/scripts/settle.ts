@@ -9,9 +9,8 @@ import {
   withMergeLock,
 } from "./main-writes.ts";
 import { runNode } from "./node-entry.ts";
+import { nodeLine, RESOLVE, type SettleResult } from "./node-outcomes.ts";
 import { scanTickets, type Ticket } from "./tickets.ts";
-
-export type SettleResult = "merged" | "failed" | "resolve";
 
 function log(msg: string): void {
   console.error(msg);
@@ -115,7 +114,7 @@ export async function settleAfterAgent(
     }
     if (integrated === "conflict") {
       log(`${ticket.id} conflict; resolve`);
-      return "resolve";
+      return RESOLVE;
     }
     const rematch = await settleMerge(
       target,
@@ -139,7 +138,7 @@ if (import.meta.main) {
       if (!ticket) throw new Error(`ticket not found: ${ticketId}`);
       const worktree = join(target, ticket.worktreeRel);
       if (!existsSync(worktree)) throw new Error(`worktree missing: ${worktree}`);
-      return `${await settleAfterAgent(target, ticket, worktree)}\n`;
+      return nodeLine(await settleAfterAgent(target, ticket, worktree));
     },
   });
 }

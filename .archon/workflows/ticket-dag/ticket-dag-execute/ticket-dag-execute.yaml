@@ -23,6 +23,7 @@ nodes:
     runtime: bun
     timeout: 7500000
     depends_on: [implement]
+    # The RESOLVE token (scripts/node-outcomes.ts in ticket-dag-drain): implement prints what settle returned.
     when: "$implement.output == 'resolve'"
     with:
       ticket: $INPUTS.ticket

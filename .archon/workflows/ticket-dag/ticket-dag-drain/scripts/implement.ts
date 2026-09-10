@@ -2,9 +2,10 @@ import { defaultAgent, type AgentRunner, type TicketAgentOpts } from "./agent.ts
 import { beginTicket } from "./begin.ts";
 import { loadConfig, type PackConfig } from "./config.ts";
 import { runNode } from "./node-entry.ts";
+import { nodeLine, type SettleResult } from "./node-outcomes.ts";
 import { implementTask } from "./prompt.ts";
 import { roleAgent } from "./roles.ts";
-import { fail, settleAfterAgent, type SettleResult } from "./settle.ts";
+import { fail, settleAfterAgent } from "./settle.ts";
 import { scanTickets } from "./tickets.ts";
 
 export type { TicketAgentOpts };
@@ -44,7 +45,7 @@ export async function runImplementCli(): Promise<void> {
     artifacts: true,
     proxy: true,
     run: async ({ target, ticketId, artifactsDir, config }) =>
-      `${await implementTicket(target, ticketId, { artifactsDir, config })}\n`,
+      nodeLine(await implementTicket(target, ticketId, { artifactsDir, config })),
   });
 }
 

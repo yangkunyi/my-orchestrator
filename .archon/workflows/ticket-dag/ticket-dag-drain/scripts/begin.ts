@@ -2,10 +2,9 @@ import { existsSync, mkdirSync } from "node:fs";
 import { join } from "node:path";
 import { branchExists, git, gitOrThrow } from "./git.ts";
 import { integrateCurrentMainIntoWorktree, stamp, withMergeLock } from "./main-writes.ts";
+import { RESOLVE, type BeginOutcome } from "./node-outcomes.ts";
 import type { Ticket } from "./tickets.ts";
 import { ensureVenvIgnored, ensureWorktreesIgnored, syncWorktreeEnv } from "./worktree-env.ts";
-
-export type BeginOutcome = "ready" | "failed" | "resolve";
 
 export type BeginResult = {
   worktree: string;
@@ -41,7 +40,7 @@ export async function beginTicket(target: string, ticket: Ticket): Promise<Begin
     return { path, integrated };
   });
   if (begun.integrated === "conflict") {
-    return result(begun.path, "resolve");
+    return result(begun.path, RESOLVE);
   }
   if (begun.integrated === "failed") {
     await stamp(target, ticket, "FAILED");

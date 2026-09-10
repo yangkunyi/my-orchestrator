@@ -27,7 +27,8 @@ function requireEnv(name: string): string {
 /**
  * The Script-node protocol the YAMLs match on: env in, one stdout token out.
  * A Git-contract outcome (including `failed`) exits 0; misconfiguration and thrown errors exit
- * non-zero. The handler's string result is written verbatim, so include your own trailing newline.
+ * non-zero. The handler's string result is written verbatim, so it hands back a node-outcomes token:
+ * the token plus exactly one trailing newline (see nodeLine).
  */
 export async function runNode(opts: NodeOpts): Promise<void> {
   if (opts.proxy) reexecForProxy();
