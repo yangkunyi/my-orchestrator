@@ -4,7 +4,7 @@
 
 **Blocked by:** 05
 
-Status: MERGING
+Status: MERGED
 
 - [ ] Both roles use the Pi SDK with cwd the Ticket Worktree
 - [ ] Prompts are inlined SKILL bodies plus leave Status unchanged; no `/skill:` names
