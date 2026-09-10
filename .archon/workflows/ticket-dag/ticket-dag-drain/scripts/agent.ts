@@ -3,9 +3,9 @@ import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import type { PackConfig, ThinkingLevel } from "./config.ts";
 
-export type AgentRole = "implement" | "conflict";
+export type AgentRole = "implement" | "conflict" | "review";
 
-/** Wall clock including nested review children, then session.abort(). */
+/** Implement/conflict wall clock, then session.abort(). */
 export const AGENT_WALL_MS = 2 * 60 * 60 * 1000;
 
 const IMPLEMENT_SKILL = `Implement the work described by the user in the spec or tickets.
@@ -13,8 +13,6 @@ const IMPLEMENT_SKILL = `Implement the work described by the user in the spec or
 Use /tdd where possible, at pre-agreed seams.
 
 Run typechecking regularly, single test files regularly, and the full test suite once at the end.
-
-Once done, use /code-review to review the work.
 
 Commit your work to the current branch.
 
@@ -40,6 +38,9 @@ export type PackAgentOpts = {
   model: string | undefined;
   thinkingLevel: ThinkingLevel;
   prompt: string;
+  tools?: string[];
+  useBash?: boolean;
+  wallMs?: number;
 };
 
 export type PackAgentResult = {
@@ -76,6 +77,40 @@ export function lastAssistantError(sessionFile: string): string | undefined {
       const row = JSON.parse(line) as { message?: { errorMessage?: unknown } };
       const msg = row.message?.errorMessage;
       if (typeof msg === "string" && msg.length > 0) last = msg;
+    } catch {
+      /* skip bad line */
+    }
+  }
+  return last;
+}
+
+function contentText(content: unknown): string | undefined {
+  if (typeof content === "string" && content.trim()) return content;
+  if (!Array.isArray(content)) return undefined;
+  const parts: string[] = [];
+  for (const part of content) {
+    if (typeof part === "string") parts.push(part);
+    else if (part && typeof part === "object" && "text" in part) {
+      const text = (part as { text: unknown }).text;
+      if (typeof text === "string" && text) parts.push(text);
+    }
+  }
+  const joined = parts.join("").trim();
+  return joined.length > 0 ? joined : undefined;
+}
+
+export function lastAssistantText(sessionFile: string): string | undefined {
+  if (!existsSync(sessionFile)) return undefined;
+  let last: string | undefined;
+  for (const line of readFileSync(sessionFile, "utf8").split("\n")) {
+    if (!line) continue;
+    try {
+      const row = JSON.parse(line) as { type?: string; message?: { role?: string; content?: unknown } };
+      if (row.type && row.type !== "message") continue;
+      const msg = row.message;
+      if (!msg || msg.role !== "assistant") continue;
+      const text = contentText(msg.content);
+      if (text) last = text;
     } catch {
       /* skip bad line */
     }

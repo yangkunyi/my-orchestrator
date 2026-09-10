@@ -54,14 +54,19 @@ export async function runPackPi(opts: PackAgentOpts): Promise<PackAgentResult> {
     modelRuntime,
     sessionManager,
     resourceLoader,
-    customTools: [
-      createBashToolDefinition(opts.cwd, {
-        spawnHook: (ctx) => ({
-          ...ctx,
-          env: { ...ctx.env, PATH: prependVenvBin(ctx.env.PATH, opts.cwd) },
+    ...(opts.tools ? { tools: opts.tools } : {}),
+    ...(opts.useBash === false
+      ? {}
+      : {
+          customTools: [
+            createBashToolDefinition(opts.cwd, {
+              spawnHook: (ctx) => ({
+                ...ctx,
+                env: { ...ctx.env, PATH: prependVenvBin(ctx.env.PATH, opts.cwd) },
+              }),
+            }),
+          ],
         }),
-      }),
-    ],
   });
 
   let aborted = false;
@@ -72,7 +77,7 @@ export async function runPackPi(opts: PackAgentOpts): Promise<PackAgentResult> {
         await session.abort();
       },
     },
-    AGENT_WALL_MS,
+    opts.wallMs ?? AGENT_WALL_MS,
   );
   try {
     try {
@@ -82,13 +87,13 @@ export async function runPackPi(opts: PackAgentOpts): Promise<PackAgentResult> {
       const msg = e instanceof Error ? e.message : String(e);
       return {
         sessionFile: file,
-        lastError: lastAssistantError(file) ?? (aborted ? "agent aborted after 2 hours" : msg),
+        lastError: lastAssistantError(file) ?? (aborted ? "agent aborted after wall clock" : msg),
       };
     }
     const file = sessionManager.getSessionFile() ?? sessionFile;
     return {
       sessionFile: file,
-      lastError: lastAssistantError(file) ?? (aborted ? "agent aborted after 2 hours" : undefined),
+      lastError: lastAssistantError(file) ?? (aborted ? "agent aborted after wall clock" : undefined),
     };
   } finally {
     cancel();

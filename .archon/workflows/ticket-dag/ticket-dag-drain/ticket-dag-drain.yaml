@@ -36,3 +36,10 @@ nodes:
             items: "$pick.output"
             as: ticket
             join: all_done
+  - id: review
+    script: review
+    runtime: bun
+    timeout: 2000000
+    depends_on: [drain]
+    with:
+      config: $INPUTS.config

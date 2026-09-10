@@ -13,6 +13,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { noopAgent } from "../scripts/agent.ts";
 import { rematchLeftovers } from "../scripts/rematch.ts";
+import { REVIEW_BASE_REL } from "../scripts/review.ts";
 import { pickStartable } from "../scripts/pick.ts";
 import { conflictTicket } from "../scripts/conflict.ts";
 import { implementTicket } from "../scripts/implement.ts";
@@ -195,6 +196,18 @@ try {
     expect("02 Worktree kept", existsSync(join(root, t2.worktreeRel)));
     const after = await pickStartable(root, { concurrency: 4, artifactsDir: artifacts });
     expectEqual("same drain does not re-pick just-FAILED", after.map((t) => t.id), []);
+  });
+
+  await withTarget(async (root, artifacts) => {
+    writeTicket(root, "feat", "01", "demo", "READY", "None");
+    commitTickets(root);
+    const head = gitC(root, "rev-parse", "HEAD");
+    await rematchLeftovers(root, artifacts);
+    expectEqual(
+      "rematch wrote review-base",
+      readFileSync(join(artifacts, REVIEW_BASE_REL), "utf8").trim(),
+      head,
+    );
   });
 
   await withTarget(async (root, artifacts) => {

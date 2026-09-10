@@ -1,6 +1,7 @@
 import { addAttempted } from "./attempted.ts";
 import { loadConfig } from "./config.ts";
 import { hasTicketMergeCommit, removeWorktreeAndBranch, stamp, withMergeLock } from "./git.ts";
+import { writeReviewBase } from "./review.ts";
 import { leftoverInFlight, scanTickets } from "./tickets.ts";
 
 export async function rematchLeftovers(target: string, artifactsDir?: string): Promise<void> {
@@ -16,6 +17,7 @@ export async function rematchLeftovers(target: string, artifactsDir?: string): P
       }
     }
     if (artifactsDir) addAttempted(artifactsDir, failedIds);
+    if (artifactsDir) await writeReviewBase(target, artifactsDir);
   });
 }
 

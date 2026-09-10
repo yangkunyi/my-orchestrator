@@ -1,5 +1,7 @@
 # Pack inlines two-axis blocking review in the implement prompt
 
+Superseded by ADR-0036. Implement no longer has two-axis review; the pack uses a drain-end read-only node instead.
+
 The Archon pack inlines the short `implement` and `resolving-merge-conflicts` SKILL bodies (plus: leave `Status:` unchanged). It does not invoke `/skill:` names and does not copy the `tdd` / `code-review` skill trees.
 
 The implement text is one file for Pi: after implement/test/commit, spawn two isolated read-only review children in parallel (Standards and Spec), wait for both, aggregate under `## Standards` and `## Spec`. Pi mapping: `subagent({ async: false, workflowScript: runs.all([...]) })` with `agent: "diff-reviewer"`. Children run `git` themselves. Drop `Once done, use /code-review` (that skill asks for a fixed point; unattended `-p` would stall or skip). Conflict text has no two-axis review.

@@ -6,4 +6,4 @@ The Implementation Agent prompt is `/skill:implement` plus the Ticket path. The 
 
 Rejected: Archon `provider: pi`, Codex, `grok -p`, wrapping the `pi` CLI, stuffing review/verify policy into the prompt, and running `implement` inside conflict resolution.
 
-The Archon pack is a different runner (ADR-0032). Its agent spawn is ADR-0033; its inlined two-axis review is ADR-0035, not this ADR.
+The Archon pack is a different runner (ADR-0032). Its agent spawn is ADR-0033; its drain-end review is ADR-0036, not this ADR.

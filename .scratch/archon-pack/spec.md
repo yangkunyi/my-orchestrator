@@ -4,7 +4,7 @@
 
 Same Ticket DAG and Git contract, as an Archon workflow pack a human starts on a Target. Not the Orchestrator. Not a Run. Not invoked from this CLI.
 
-Glossary: `CONTEXT.md`. Decisions: ADR-0032, ADR-0033, ADR-0034, ADR-0035 (also ADR-0001, ADR-0023, ADR-0025, ADR-0027, ADR-0029, ADR-0030, ADR-0031).
+Glossary: `CONTEXT.md`. Decisions: ADR-0032, ADR-0033, ADR-0034, ADR-0036 (supersedes ADR-0035; also ADR-0001, ADR-0023, ADR-0025, ADR-0027, ADR-0029, ADR-0030, ADR-0031).
 
 ## Problem Statement
 
@@ -12,7 +12,7 @@ The Orchestrator already drains Tickets on a Target. An operator who already run
 
 ## Solution
 
-Ship an Archon pack in this repository. Copy it to the operator's global Archon workflows folder. On a Target, the operator runs `ticket-dag-drain`. Pack bun TypeScript scripts reimplement the Git contract (they do not import this repository). Each Ticket's Implementation Agent and Conflict Agent are Pi SDK sessions with cwd the Ticket Worktree. Config is `ticket-dag.yaml` on the Target, overridable by a path input. Inspect stays Archon's run records. Stop is `archon workflow cancel`. The next drain rematches leftovers and may start eligible FAILED Tickets.
+Ship an Archon pack in this repository. Copy it to the operator's global Archon workflows folder. On a Target, the operator runs `ticket-dag-drain`. Pack bun TypeScript scripts reimplement the Git contract (they do not import this repository). Each Ticket's Implementation Agent and Conflict Agent are Pi SDK sessions with cwd the Ticket Worktree. After the drain loop, bun pastes the drain-range diff into one read-only Pi session on Main and writes `$ARTIFACTS_DIR/review.md` (advisory). Config is `ticket-dag.yaml` on the Target, overridable by a path input. Inspect stays Archon's run records. Stop is `archon workflow cancel`. The next drain rematches leftovers and may start eligible FAILED Tickets.
 
 ## User Stories
 
@@ -122,7 +122,7 @@ Ship an Archon pack in this repository. Copy it to the operator's global Archon 
 
 53. As an operator, I want no TUI permission prompts (SDK in-process), so unattended drain can run.
 
-54. As an operator, I want a 2 hour wall clock including nested review children, then `session.abort()`, so a stuck agent becomes FAILED.
+54. As an operator, I want a 2 hour wall clock on implement and conflict, then `session.abort()`, so a stuck agent becomes FAILED.
 
 55. As an operator, I want the Archon script node timeout longer than 2 hours (7500000ms), so abort can stamp FAILED and exit 0 before Archon kills the process.
 
@@ -148,23 +148,23 @@ Ship an Archon pack in this repository. Copy it to the operator's global Archon 
 
 66. As an operator, I want extra YAML keys ignored.
 
-67. As an operator, I want the implement prompt to be the short implement SKILL body plus leave `Status:` unchanged plus the two-axis blocking review recipe, not a `/skill:` name.
+67. As an operator, I want the implement prompt to be the short implement SKILL body plus leave `Status:` unchanged, not a `/skill:` name, and with no two-axis review recipe.
 
-68. As an operator, I want `Once done, use /code-review` dropped, so unattended review does not ask for a fixed point.
+68. As an operator, I want `Once done, use /code-review` dropped, so unattended implement does not ask for a fixed point.
 
 69. As an operator, I want the pack not to copy the `tdd` or `code-review` skill trees.
 
-70. As an operator, I want one implement text for Pi: after implement/test/commit, spawn two isolated read-only review children in parallel (Standards and Spec), wait for both, aggregate under `## Standards` and `## Spec`.
+70. As an operator, I want a bun review node after the drain loop (`depends_on: drain`), cwd Target Main, 30 minute wall, Archon timeout 2000000ms.
 
-71. As an operator, I want that fanout to be `subagent({ async: false, workflowScript: runs.all([...]) })` with `agent: "diff-reviewer"`, children running `git` themselves.
+71. As an operator, I want that node to paste `git diff <review-base>...HEAD` into a Pi session whose tools are only `read`, `grep`, `find`, and `ls` (no bash, no spawn, no `/code-review`).
 
-72. As an operator, I want the pack not to ship `diff-reviewer.md`.
+72. As an operator, I want rematch to write `$ARTIFACTS_DIR/review-base` = Main HEAD, bun to write `$ARTIFACTS_DIR/review.md` from the last assistant text, and an empty diff to skip the session.
 
-73. As an operator, I want preflight before the implement session: `pi-subagents` loaded and an agent named `diff-reviewer` present; if either is missing, stamp FAILED and do not start the agent.
+73. As an operator, I want the review node to exit 0 even when the report lists bugs or Pi throws; missing `ARTIFACTS_DIR` still fails as misconfig.
 
-74. As an operator, I want the pack not to parse review reports; settle stays the Git contract.
+74. As an operator, I want the pack not to parse review reports; settle stays the Git contract; no `pi-subagents` / `diff-reviewer` preflight; pack does not ship `diff-reviewer.md`.
 
-75. As an operator, I want the conflict prompt to be the short resolving-merge-conflicts SKILL body plus leave `Status:` unchanged, with no two-axis review.
+75. As an operator, I want the conflict prompt to be the short resolving-merge-conflicts SKILL body plus leave `Status:` unchanged, with no review.
 
 76. As an operator, I want neither agent to change the Ticket `Status:` line.
 
@@ -184,7 +184,7 @@ Ship an Archon pack in this repository. Copy it to the operator's global Archon 
 
 84. As an operator, I want merge still only to local Main, with no origin push.
 
-85. As an operator, I want the pack still not to read diffs or judge code quality except for the inlined review inside the Implementation Agent session.
+85. As an operator, I want the pack not to read diffs except the drain-end bun parent pasting the range into the read-only session; that report does not stamp Tickets.
 
 86. As an operator, I want pick order to follow a scan of current `.scratch/` Ticket files, same as this CLI's start batch (first N startable).
 
@@ -196,9 +196,9 @@ Ship an Archon pack in this repository. Copy it to the operator's global Archon 
 
 - Pack scripts: TypeScript, Archon bun runtime. Reimplement the Git contract from CONTEXT. Do not import this repository. Do not wrap the `orchestrator` binary as nodes.
 
-- Public workflow: `ticket-dag-drain` only. Drain YAML: `worktree.enabled: false`. Rematch node `always_run`. Then `loop_group` until pick empty, `max_iterations` 500. Each iteration: pick at most `concurrency` startable Tickets; `include:` fan-out, `join: all_done`. Execute include requires a Ticket id.
+- Public workflow: `ticket-dag-drain` only. Drain YAML: `worktree.enabled: false`. Rematch node `always_run` (also writes `review-base`). Then `loop_group` until pick empty, `max_iterations` 500. Each iteration: pick at most `concurrency` startable Tickets; `include:` fan-out, `join: all_done`. After the loop: bun review node. Execute include requires a Ticket id.
 
-- Per Ticket: two bun script nodes. Implement: begin (or resume) Worktree, `uv sync --frozen` when needed, preflight, Pi SDK session, settleAfterAgent. Stdout one token `merged` / `failed` / `resolve`. Conflict node only when stdout is `resolve`. Git-contract FAILED → process exit 0. Crash/kill → exit ≠ 0. Attempted ids this drain: Archon artifacts directory.
+- Per Ticket: two bun script nodes. Implement: begin (or resume) Worktree, `uv sync --frozen` when needed, Pi SDK session, settleAfterAgent. Stdout one token `merged` / `failed` / `resolve`. Conflict node only when stdout is `resolve`. Git-contract FAILED → process exit 0. Crash/kill → exit ≠ 0. Attempted ids this drain: Archon artifacts directory.
 
 - startable: READY or FAILED, blockers MERGED, no merge commit of that branch on Main, not attempted this drain. This drain does not start a Ticket it just FAILED. Next drain may.
 
@@ -208,11 +208,11 @@ Ship an Archon pack in this repository. Copy it to the operator's global Archon 
 
 - Merge onto Main serial under the pack's own lock, not the CLI lock. Parallel Tickets up to `concurrency`.
 
-- Agents: Pi SDK `createAgentSession`, cwd the Ticket Worktree. Pi only. No Archon `prompt:`/`command:` as the Ticket agent. No `pi` CLI spawn. No Claude. No TUI. Wall clock 2 hours then abort. Archon node timeout 7500000ms. `NODE_USE_ENV_PROXY=1`. No `httpProxy` from YAML. Sessions under artifacts `sessions/<ticket-id>/`.
+- Agents: Pi SDK `createAgentSession`, cwd the Ticket Worktree. Pi only. No Archon `prompt:`/`command:` as the Ticket agent. No `pi` CLI spawn. No Claude. No TUI. Implement/conflict wall clock 2 hours then abort. Archon implement/conflict timeout 7500000ms. `NODE_USE_ENV_PROXY=1`. No `httpProxy` from YAML. Sessions under artifacts `sessions/<ticket-id>/`. Drain-end review: cwd Main, tools `read`/`grep`/`find`/`ls`, no bash, 30 minute wall, session `sessions/drain-review/review.jsonl`.
 
 - Config: Target `ticket-dag.yaml` keys `model`, `thinkingLevel`, `concurrency`. Archon `inputs.config` default that path. `--input config=` selects another file. Missing file: Pi default model, `thinkingLevel: high`, `concurrency: 4`. Invalid `thinkingLevel` or `concurrency` fails the drain. Extra keys ignored. Do not read `orchestrator.yaml`.
 
-- Prompts: inline short implement and resolving-merge-conflicts SKILL bodies plus leave `Status:` unchanged. Implement also has two-axis blocking review (`subagent` + `async: false` + `runs.all`, `agent: "diff-reviewer"`, children run git). Drop `use /code-review`. Do not copy tdd/code-review trees. Conflict has no two-axis review. Pack does not ship `diff-reviewer`. Preflight: `pi-subagents` and `diff-reviewer` or stamp FAILED without starting the agent. Pack does not parse review output.
+- Prompts: inline short implement and resolving-merge-conflicts SKILL bodies plus leave `Status:` unchanged. Keep `/tdd`. Drop `use /code-review`. No two-axis fanout in implement. Conflict has no review. Drain-end review prompt: bugs / missing tests / cross-file impact on the pasted diff; no Spec axis. Pack does not ship `diff-reviewer`. No `pi-subagents` / `diff-reviewer` preflight. Pack does not parse review output.
 
 - Inspect is Archon records. `orchestrator inspect` does not see pack. Cancel: `archon workflow cancel`. No pack retry/recover/stop. Next drain rematches.
 
@@ -220,13 +220,13 @@ Ship an Archon pack in this repository. Copy it to the operator's global Archon 
 
 ## Testing Decisions
 
-- One seam: the pack's Git contract, config loader, and review preflight as bun-callable functions. Drive them with a temp Target (init git, Ticket files, branches, Worktrees). Assert Status line, merge commit message and parents, Worktree present or gone, stdout token, process exit code. Do not boot Archon. Do not start a live Pi session. Do not import this repository's scheduler.
+- One seam: the pack's Git contract, config loader, and review node as bun-callable functions. Drive them with a temp Target (init git, Ticket files, branches, Worktrees). Assert Status line, merge commit message and parents, Worktree present or gone, stdout token, process exit code, `review-base` / `review.md`. Do not boot Archon. Do not start a live Pi session. Do not import this repository's scheduler.
 
 - Git contract cases (match existing CLI repros): leftover with merge commit → MERGED, Worktree gone; leftover with only ancestry → FAILED, Worktree kept; empty merge → FAILED; dirty after agent → FAILED; resume keeps dirty files and ticket-branch commits; missing tree with branch recreates from the branch; FAILED with merge commit already on Main → MERGED, no Worktree create; a Ticket just FAILED is not in the next pick of the same attempted set; pick size honors `concurrency`.
 
 - Config: missing file → defaults; `--input` path equivalent (function argument) reads that file; invalid `thinkingLevel` / `concurrency` throws or fails the drain entry; extra keys ignored; `orchestrator.yaml` is not read.
 
-- Preflight: fake agent dir without `diff-reviewer` → FAILED, no session; with `diff-reviewer` → preflight passes (do not run Pi).
+- Review: rematch writes `review-base` = HEAD; empty diff does not call the agent; non-empty diff with a fake agent writes `review.md`; missing `ARTIFACTS_DIR` fails the CLI; git-diff fail or Pi throw still write `review.md` and do not fail the drain. No live Pi.
 
 - Archon YAML is not unit-tested here. Operator copies the pack and may run `archon validate` by hand.
 
@@ -240,6 +240,9 @@ Ship an Archon pack in this repository. Copy it to the operator's global Archon 
 - Replacing the Orchestrator with the pack
 - Python pack scripts, spawning `pi -p`, Claude, Archon `prompt:` as the Ticket agent
 - Shipping `diff-reviewer` or copying tdd/code-review skill trees
+- Per-ticket two-axis review in implement
+- Failing the drain on review findings
+- Installing pr-review, CodeRabbit, Copilot review, earendil pi-review, or the Anthropic `/code-review` plugin
 - Target committing `.archon/`
 - `httpProxy` on `ticket-dag.yaml`
 - Pack retry/recover/stop workflows
@@ -250,7 +253,7 @@ Ship an Archon pack in this repository. Copy it to the operator's global Archon 
 
 ## Further Notes
 
-The pack is not written yet. CONTEXT and ADR-0032–0035 are the contract. This spec is the work to author the pack.
+CONTEXT and ADR-0032–0034 plus ADR-0036 are the contract. ADR-0035 is superseded.
 
 Operator-surface (`.scratch/operator-surface/spec.md`) is the CLI rematch/resume/inspect work. Do not mix those tickets with this Feature.
 

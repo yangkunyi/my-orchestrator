@@ -9,12 +9,15 @@ import {
   conflictPrompt,
   implementPrompt,
   lastAssistantError,
+  lastAssistantText,
   noopAgent,
   proxyEnv,
   ticketSessionFile,
 } from "../scripts/agent.ts";
+import { REVIEW_TOOLS, REVIEW_WALL_MS, reviewPrompt } from "../scripts/review.ts";
 
 const executeYaml = join(import.meta.dir, "../../ticket-dag-execute/ticket-dag-execute.yaml");
+const drainYaml = join(import.meta.dir, "../ticket-dag-drain.yaml");
 
 function expect(name: string, cond: unknown, detail?: unknown): void {
   if (!cond) {
@@ -39,6 +42,8 @@ try {
   expect("implement leaves Status unchanged", impl.includes("Leave the ticket file's `Status:` line unchanged"));
   expect("implement has no /skill: name", !impl.includes("/skill:"));
   expect("implement does not spawn pi CLI", !impl.includes("pi -p"));
+  expect("implement drops /code-review", !impl.includes("/code-review"));
+  expect("implement has no two-axis fanout", !impl.includes("diff-reviewer") && !impl.includes("## Standards"));
 
   const conf = conflictPrompt(".scratch/feat/issues/01-demo.md");
   expect("conflict inlines skill body", conf.includes("Always resolve; never `--abort`."));
@@ -59,6 +64,11 @@ try {
       ticketSessionFile(artifacts, "feat/01", "conflict"),
       join(artifacts, "sessions", "feat/01", "conflict.jsonl"),
     );
+    expectEqual(
+      "review session path",
+      ticketSessionFile(artifacts, "drain-review", "review"),
+      join(artifacts, "sessions", "drain-review", "review.jsonl"),
+    );
     expect(
       "sessions are under artifacts not Run records",
       !ticketSessionFile(artifacts, "feat/01", "implement").includes("orchestrator/runs"),
@@ -72,6 +82,20 @@ try {
     );
     expectEqual("lastAssistantError", lastAssistantError(sessionFile), "Request timed out.");
     expectEqual("missing session has no error", lastAssistantError(join(artifacts, "missing.jsonl")), undefined);
+
+    const textFile = join(artifacts, "sessions", "feat", "01", "text.jsonl");
+    writeFileSync(
+      textFile,
+      `${JSON.stringify({ type: "message", message: { role: "assistant", content: [{ type: "text", text: "looks ok" }] } })}\n`,
+    );
+    expectEqual("lastAssistantText", lastAssistantText(textFile), "looks ok");
+    const strFile = join(artifacts, "sessions", "feat", "01", "str.jsonl");
+    writeFileSync(
+      strFile,
+      `${JSON.stringify({ type: "message", message: { role: "assistant", content: "plain" } })}\n`,
+    );
+    expectEqual("lastAssistantText string content", lastAssistantText(strFile), "plain");
+    expectEqual("missing session has no text", lastAssistantText(join(artifacts, "missing.jsonl")), undefined);
 
     const noop = await noopAgent({
       cwd: artifacts,
@@ -90,10 +114,25 @@ try {
 
   expectEqual("2 hour wall clock", AGENT_WALL_MS, 2 * 60 * 60 * 1000);
   expect("wall clock shorter than Archon timeout", AGENT_WALL_MS < 7_500_000);
+  expectEqual("review wall 30 min", REVIEW_WALL_MS, 30 * 60 * 1000);
+  expect("review wall shorter than review node timeout", REVIEW_WALL_MS < 2_000_000);
+  expectEqual("review tools are read-only", REVIEW_TOOLS, ["read", "grep", "find", "ls"]);
+
+  const rp = reviewPrompt("abc", "c1", "+foo");
+  expect("review prompt pins range", rp.includes("abc...HEAD"));
+  expect("review forbids /code-review", rp.includes("Do not edit, commit, spawn agents, or invoke /code-review"));
+  expect("review forbids Spec axis", rp.includes("Do not produce a Standards-vs-Spec pair"));
+  expect("review has no two-axis recipe", !rp.includes("## Standards") && !rp.includes("diff-reviewer"));
+  expect("review is not ticket Spec", rp.includes("Do not check ticket acceptance criteria"));
 
   const yaml = readFileSync(executeYaml, "utf8");
   expect("implement node timeout 7500000", /id: implement[\s\S]*?timeout: 7500000/.test(yaml));
   expect("conflict node timeout 7500000", /id: conflict[\s\S]*?timeout: 7500000/.test(yaml));
+
+  const drain = readFileSync(drainYaml, "utf8");
+  expect("review node after drain", /id: review[\s\S]*?depends_on: \[drain\]/.test(drain));
+  expect("review node timeout 2000000", /id: review[\s\S]*?timeout: 2000000/.test(drain));
+  expect("review script is pack bun", /id: review[\s\S]*?script: review/.test(drain));
 
   const env = proxyEnv({ PATH: "/bin", HTTP_PROXY: "http://already.set" });
   expectEqual("NODE_USE_ENV_PROXY at process start", env.NODE_USE_ENV_PROXY, "1");
