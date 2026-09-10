@@ -8,6 +8,6 @@ One Archon run is the drain (`ticket-dag-drain`): `worktree.enabled: false` on t
 
 Same local-Main Worktree rules, merge message (`orchestrator: merge ticket/…`), empty-merge, leftover rematch, and `uv sync --frozen` as this CLI. Archon `isolation: worktree` cannot be the Ticket Worktree. Parallel Tickets; merge onto Main stays serial under the pack's own lock (not the CLI's `proper-lockfile`). `orchestrator inspect` does not show pack drains. Pi sessions live under `$ARTIFACTS_DIR/sessions/<ticket-id>/`.
 
-Agent runtime: ADR-0033. Config: ADR-0034. Drain-end review: ADR-0036 (supersedes ADR-0035).
+Agent runtime: ADR-0033. Config: ADR-0034. Drain-end review: ADR-0036 (supersedes ADR-0035). Module layout: ADR-0037.
 
 Rejected: replacing this CLI with Archon; wrapping `orchestrator` as an Archon node; static YAML nodes, one per Ticket; importing `src/` or `dist/`; nested `archon workflow run` per Ticket; Python/uv pack scripts; spawning the Target's Archon project assistant.
