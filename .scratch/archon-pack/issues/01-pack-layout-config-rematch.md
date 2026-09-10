@@ -4,7 +4,7 @@
 
 **Blocked by:** None — can start immediately
 
-Status: RUNNING
+Status: MERGING
 
 - [ ] Pack source lives in this repository and is meant to be copied to the operator's global Archon workflows folder
 - [ ] Config from `ticket-dag.yaml` or a `config` path input; missing file uses the three defaults; invalid `thinkingLevel` / `concurrency` fails the drain; extra keys ignored; `orchestrator.yaml` is not read
