@@ -1,7 +1,9 @@
 # Operator actions are not Runs; stay this program
 
-`orchestrator retry`, `recover`, and `stop` stamp Status and rematch leftovers. They are not Runs. While a Run is live: retry and recover refuse; Inspect stays read-only; stop sends SIGTERM to the live Run then rematches leftovers (same function as recover). Retry takes one Ticket id; recover rematches all leftovers; stop ends the whole Run.
+There is no retry command. The next drain starts eligible FAILED Tickets (no merge commit, not attempted this drain). `orchestrator recover` and `stop` (CLI) rematch leftovers and are not Runs. While a Run is live: recover refuses; Inspect stays read-only; stop sends SIGTERM to the live Run then rematches leftovers (same function as recover). Recover rematches all leftovers and starts no Ticket. Stop ends the whole Run.
 
-Hosting the Git contract as Archon script nodes with `--no-worktree` was considered again. Archon isolation still cuts child worktrees from `origin/<base>` and does not merge to local Main, so the Git contract would still be ours plus two recovery stories. UI, Slack, and approval gates are out of the first operator spec.
+The Archon pack has no recover/stop workflow: `archon workflow cancel` ends the drain run; leftover rematch is the next `ticket-dag-drain`'s first node (and that drain will also start eligible FAILED).
 
-Rejected: retry as a drain; wrapping Archon as the YAML host (ADR-0001 still holds).
+Hosting this CLI as Archon script nodes was considered again and rejected (ADR-0001 still holds). The pack is a second runner, not this program (ADR-0032).
+
+Rejected: `orchestrator retry`; a pack retry workflow; wrapping Archon as the YAML host of this CLI.

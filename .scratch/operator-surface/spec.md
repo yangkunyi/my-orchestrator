@@ -2,7 +2,7 @@
 
 **Triage:** ready-for-agent
 
-Thin scheduler stays this Orchestrator. Operator can retry, recover, stop, and inspect a Target without a second product and without judging diffs.
+Thin scheduler stays this Orchestrator. Operator can recover, stop, and inspect a Target without a second product and without judging diffs. FAILED Tickets start again on the next drain; there is no retry command.
 
 Glossary: `CONTEXT.md`. Decisions: ADR-0029, ADR-0030, ADR-0031 (also ADR-0001, ADR-0017, ADR-0021, ADR-0023).
 
@@ -16,9 +16,9 @@ Keep this Orchestrator. Do not host it on Archon.
 
 One Git contract for complete and leftover rematch: Main has a `--no-ff` merge commit of that Ticket branch (`orchestrator: merge ticket/…`, second parent) → stamp MERGED and remove the Worktree. Mere ancestry is not enough. If that commit exists, do not create a Worktree or merge again.
 
-FAILED without that commit: Retry stamps READY (no Run). Next start reuses the Worktree and branch, integrates current Main first, keeps dirty files. Missing tree with branch: recreate from the ticket branch, not Main. Neither exists: first-start from Main HEAD. Dirty at merge time is still FAILED. MERGED still removes the Worktree.
+FAILED without that commit: the next drain may start it again (reuse Worktree; this drain will not). Missing tree with branch: recreate from the ticket branch, not Main. Neither exists: first-start from Main HEAD. Dirty at merge time is still FAILED. MERGED still removes the Worktree.
 
-`orchestrator retry <target> <ticket-id>`, `recover <target>`, `stop <target>` are not Runs. Live Run: retry and recover refuse; Inspect stays read-only; stop SIGTERM then rematch (same function as recover). Inspect snapshot adds FAILED reason, leftover Worktree path, next startable Tickets. `inspect --follow` prints new events and exits when the Run has exited or the records are stale.
+`orchestrator recover <target>` and `stop <target>` are not Runs. Live Run: recover refuses; Inspect stays read-only; stop SIGTERM then rematch (same function as recover). Inspect snapshot adds FAILED reason, leftover Worktree path, next startable Tickets. `inspect --follow` prints new events and exits when the Run has exited or the records are stale.
 
 ## User Stories
 
@@ -108,7 +108,7 @@ FAILED without that commit: Retry stamps READY (no Run). Next start reuses the W
 
 - Leftover in-flight without that commit: stamp FAILED, keep Worktree.
 
-- Retry: one id. Live Run → refuse. Not FAILED → refuse. FAILED and complete → stamp MERGED. FAILED and not complete → stamp READY, no Run.
+- Retry command removed (superseded). Next drain starts FAILED Tickets with no merge commit that this drain has not attempted. Same Worktree. This drain does not start a Ticket it just stamped FAILED. FAILED with merge commit already on Main → stamp MERGED, no agent.
 
 - Recover: all leftover in-flight, same rematch. Live Run → refuse. Not a Run.
 
@@ -118,7 +118,7 @@ FAILED without that commit: Retry stamps READY (no Run). Next start reuses the W
 
 - Inspect: add FAILED reason (from Journal events), leftover Worktree path if the directory exists, next startable Ticket ids from a read of current Ticket files. `--follow` tails new event lines; exit when Run exited or pid stale.
 
-- Command names: `orchestrator retry <target> <id>`, `orchestrator recover <target>`, `orchestrator stop <target>`, `orchestrator inspect <target> [id] --follow`. cac subcommands. No new dependency.
+- Command names: `orchestrator recover <target>`, `orchestrator stop <target>`, `orchestrator inspect <target> [id] --follow`. No `retry`. cac subcommands. No new dependency.
 
 - Do not change: serial merge lock, empty-merge FAILED, dirty-after-agent FAILED, Pi in-process, one live Run, local Main only, mechanical scheduler.
 
@@ -136,7 +136,8 @@ FAILED without that commit: Retry stamps READY (no Run). Next start reuses the W
 
 - Archon, n8n, Worktrunk, `agent-worktree`, Beads, Gas Town
 - Colors, TUI, desktop notifications, making `--detach` the default
-- Auto-retry, retry-all, recover of a single id, stop of one Ticket
+- recover of a single id, stop of one Ticket
+- `orchestrator retry` (next drain starts eligible FAILED instead)
 - Origin push, judging diffs, review as an Orchestrator stage
 - Changing Target YAML beyond what already exists
 - Rewriting 11's Status on endo_label from this spec (operator Recover after this ships)
@@ -144,5 +145,7 @@ FAILED without that commit: Retry stamps READY (no Run). Next start reuses the W
 ## Further Notes
 
 Code today still rematches leftovers with ancestry and deletes the Worktree on every start. That is the old implementation. This spec is the contract.
+
+User stories that mention `orchestrator retry` or stamping READY to start FAILED are superseded: next drain starts eligible FAILED.
 
 Historical product write-up: `.scratch/coding-orchestrator/spec.md`. Module names: `.scratch/architecture/spec.md`.
