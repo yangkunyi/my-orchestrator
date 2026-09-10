@@ -1,7 +1,7 @@
 import { existsSync, mkdirSync, writeFileSync } from "node:fs";
 import { dirname } from "node:path";
 import { AGENT_WALL_MS, armSessionAbort, type PackAgentOpts, type PackAgentResult } from "./agent.ts";
-import { lastAssistantError, ticketSessionFile } from "./session-log.ts";
+import { lastAssistantError, roleSessionFile } from "./session-log.ts";
 import { composeMessage } from "./prompt.ts";
 import { prependVenvBin } from "./worktree-env.ts";
 
@@ -16,11 +16,11 @@ export async function runPackPi(opts: PackAgentOpts): Promise<PackAgentResult> {
     SessionManager,
   } = await import("@earendil-works/pi-coding-agent");
 
-  const sessionFile = ticketSessionFile(opts.artifactsDir, opts.ticketId, opts.role);
+  const sessionFile = roleSessionFile(opts.artifactsDir, opts.sessionKey, opts.role);
   mkdirSync(dirname(sessionFile), { recursive: true });
   if (!existsSync(sessionFile)) writeFileSync(sessionFile, "");
   const sessionManager = SessionManager.open(sessionFile, dirname(sessionFile), opts.cwd);
-  sessionManager.appendSessionInfo(`${opts.ticketId} ${opts.role}`);
+  sessionManager.appendSessionInfo(`${opts.sessionKey} ${opts.role}`);
 
   const modelRuntime = await ModelRuntime.create();
   let model = undefined;

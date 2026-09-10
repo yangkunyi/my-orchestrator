@@ -2,8 +2,8 @@ import { defaultAgent, type AgentRunner, type TicketAgentOpts } from "./agent.ts
 import { beginTicket } from "./begin.ts";
 import { loadConfig, type PackConfig } from "./config.ts";
 import { runNode } from "./node-entry.ts";
-import { implementTask, personaFor } from "./prompt.ts";
-import { ticketSessionFile } from "./session-log.ts";
+import { implementTask } from "./prompt.ts";
+import { roleAgent } from "./roles.ts";
 import { fail, settleAfterAgent, type SettleResult } from "./settle.ts";
 import { scanTickets } from "./tickets.ts";
 
@@ -20,19 +20,17 @@ export async function implementTicket(
   if (begun.outcome !== "ready") return begun.outcome;
   const config: PackConfig = opts.config ?? loadConfig(target);
   const runAgent: AgentRunner = opts.runAgent ?? defaultAgent;
-  console.error(`${ticket.id} session ${ticketSessionFile(opts.artifactsDir, ticket.id, "implement")}`);
+  const agent = roleAgent({
+    role: "implement",
+    args: { ticketId: ticket.id },
+    cwd: begun.worktree,
+    artifactsDir: opts.artifactsDir,
+    config,
+    prompt: implementTask(ticket.relPath),
+  });
+  console.error(`${ticket.id} session ${agent.sessionFile}`);
   try {
-    const pi = await runAgent({
-      cwd: begun.worktree,
-      artifactsDir: opts.artifactsDir,
-      ticketId: ticket.id,
-      role: "implement",
-      model: config.model,
-      thinkingLevel: config.thinkingLevel,
-      runner: config.runner,
-      persona: personaFor("implement", config.runner),
-      prompt: implementTask(ticket.relPath),
-    });
+    const pi = await runAgent(agent.opts);
     return settleAfterAgent(target, ticket, begun.worktree, pi.lastError);
   } catch (e) {
     await fail(target, ticket, e instanceof Error ? e.message : String(e));

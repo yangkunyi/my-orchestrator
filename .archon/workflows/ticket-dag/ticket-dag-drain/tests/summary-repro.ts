@@ -4,8 +4,9 @@ import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { type AgentRunner, type PackAgentOpts } from "../scripts/agent.ts";
 import { REVIEW_AXES } from "../scripts/prompt.ts";
-import { REVIEW_BASE_REL, REVIEW_MD_REL, REVIEW_TOOLS, REVIEW_WALL_MS, reviewDrain, writeReviewBase } from "../scripts/review.ts";
-import { ticketSessionFile } from "../scripts/session-log.ts";
+import { REVIEW_BASE_REL, REVIEW_MD_REL, reviewDrain, writeReviewBase } from "../scripts/review.ts";
+import { REVIEW_TOOLS, REVIEW_WALL_MS } from "../scripts/roles.ts";
+import { roleSessionFile } from "../scripts/session-log.ts";
 import { SUMMARY_MD_REL, summarizeDrain } from "../scripts/summary.ts";
 import { envWithout, expect, expectEqual, gitC, runScript, withTarget } from "./target.ts";
 
@@ -25,7 +26,7 @@ function fakeAgent(
   const seen: PackAgentOpts[] = [];
   const run: AgentRunner = async (opts) => {
     seen.push(opts);
-    const sessionFile = ticketSessionFile(opts.artifactsDir, opts.ticketId, opts.role);
+    const sessionFile = roleSessionFile(opts.artifactsDir, opts.sessionKey, opts.role);
     mkdirSync(dirname(sessionFile), { recursive: true });
     writeFileSync(
       sessionFile,
@@ -95,7 +96,7 @@ try {
     const seen = fake.all()[0];
     expect("agent ran", seen);
     expectEqual("summary cwd is Main", seen?.cwd, root);
-    expectEqual("summary ticket id", seen?.ticketId, "drain-summary");
+    expectEqual("summary session key", seen?.sessionKey, "drain-summary");
     expectEqual("summary role", seen?.role, "summary");
     expectEqual("summary model from config", seen?.model, "highland/deepseek-v4-flash");
     expectEqual("summary thinkingLevel from config", seen?.thinkingLevel, "high");
@@ -117,14 +118,14 @@ try {
     expect("the log text is not used", !readOut(artifacts).includes("summary from the log"));
     expectEqual(
       "summary session path",
-      ticketSessionFile(artifacts, "drain-summary", "summary"),
+      roleSessionFile(artifacts, "drain-summary", "summary"),
       join(artifacts, "sessions", "drain-summary", "summary.jsonl"),
     );
   });
 
   await withReview(async (root, artifacts) => {
     const fake: AgentRunner = async (opts) => ({
-      sessionFile: ticketSessionFile(opts.artifactsDir, opts.ticketId, opts.role),
+      sessionFile: roleSessionFile(opts.artifactsDir, opts.sessionKey, opts.role),
       lastError: "Request timed out.",
     });
     await summarizeDrain(root, { artifactsDir: artifacts, runAgent: fake });

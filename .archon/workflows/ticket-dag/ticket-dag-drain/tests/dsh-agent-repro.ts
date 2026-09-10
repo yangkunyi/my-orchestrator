@@ -78,7 +78,7 @@ writeFileSync(
   probe,
   `import { dshAgent } from ${JSON.stringify(join(import.meta.dir, "../scripts/dsh-agent.ts"))};\n` +
     `try {\n` +
-    `  await dshAgent({ cwd: process.cwd(), artifactsDir: process.cwd(), ticketId: "feat/01", role: "implement", model: undefined, thinkingLevel: "high", prompt: "do it", persona: "PERSONA" });\n` +
+    `  await dshAgent({ cwd: process.cwd(), artifactsDir: process.cwd(), sessionKey: "feat/01", role: "implement", model: undefined, thinkingLevel: "high", prompt: "do it", persona: "PERSONA" });\n` +
     `  console.log(JSON.stringify({ threw: false }));\n` +
     `} catch (e) {\n` +
     `  console.log(JSON.stringify({ threw: true, message: e instanceof Error ? e.message : String(e) }));\n` +
@@ -103,7 +103,7 @@ const run = ({ role, task, persona, model, level = "high" }: Call) =>
   dshAgent({
     cwd: work,
     artifactsDir: work,
-    ticketId: "feat/01",
+    sessionKey: "feat/01",
     role,
     model,
     thinkingLevel: level,
@@ -195,7 +195,7 @@ try {
       dshAgent({
         cwd: work,
         artifactsDir: work,
-        ticketId: "feat/01",
+        sessionKey: "feat/01",
         role: "implement",
         model: undefined,
         thinkingLevel: "high",

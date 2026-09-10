@@ -5,8 +5,8 @@ import { join } from "node:path";
 import { AGENT_WALL_MS, armSessionAbort, noopAgent } from "../scripts/agent.ts";
 import { composeMessage, conflictTask, implementTask, personaFor, REVIEW_AXES, reviewPersona, reviewTask } from "../scripts/prompt.ts";
 import { proxyEnv } from "../scripts/proxy.ts";
-import { lastAssistantError, lastAssistantText, ticketSessionFile } from "../scripts/session-log.ts";
-import { REVIEW_TOOLS, REVIEW_WALL_MS } from "../scripts/review.ts";
+import { lastAssistantError, lastAssistantText, roleSessionFile } from "../scripts/session-log.ts";
+import { REVIEW_TOOLS, REVIEW_WALL_MS } from "../scripts/roles.ts";
 import { expect, expectEqual, mkTemp, sleep } from "./target.ts";
 
 const executeYaml = join(import.meta.dir, "../../ticket-dag-execute/ticket-dag-execute.yaml");
@@ -33,25 +33,25 @@ try {
   try {
     expectEqual(
       "implement session path",
-      ticketSessionFile(artifacts, "feat/01", "implement"),
+      roleSessionFile(artifacts, "feat/01", "implement"),
       join(artifacts, "sessions", "feat/01", "implement.jsonl"),
     );
     expectEqual(
       "conflict session path",
-      ticketSessionFile(artifacts, "feat/01", "conflict"),
+      roleSessionFile(artifacts, "feat/01", "conflict"),
       join(artifacts, "sessions", "feat/01", "conflict.jsonl"),
     );
     expectEqual(
       "review session path",
-      ticketSessionFile(artifacts, "drain-review-1", "review"),
+      roleSessionFile(artifacts, "drain-review-1", "review"),
       join(artifacts, "sessions", "drain-review-1", "review.jsonl"),
     );
     expect(
       "sessions are under artifacts not Run records",
-      !ticketSessionFile(artifacts, "feat/01", "implement").includes("orchestrator/runs"),
+      !roleSessionFile(artifacts, "feat/01", "implement").includes("orchestrator/runs"),
     );
 
-    const sessionFile = ticketSessionFile(artifacts, "feat/01", "implement");
+    const sessionFile = roleSessionFile(artifacts, "feat/01", "implement");
     mkdirSync(join(artifacts, "sessions", "feat", "01"), { recursive: true });
     writeFileSync(
       sessionFile,
@@ -77,7 +77,7 @@ try {
     const noop = await noopAgent({
       cwd: artifacts,
       artifactsDir: artifacts,
-      ticketId: "feat/01",
+      sessionKey: "feat/01",
       role: "implement",
       model: undefined,
       thinkingLevel: "high",

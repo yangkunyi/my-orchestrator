@@ -2,6 +2,7 @@ import { readFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import { STATUSES } from "./ticket-line.ts";
+import type { AgentRole } from "./agent.ts";
 import type { Runner } from "./config.ts";
 
 /** The Status vocabulary as the prompts spell it. */
@@ -102,10 +103,38 @@ function tddPersona(): string {
   }
 }
 
-/** The skill body a persona-taking runner puts in its system prompt. */
-export function personaFor(role: "implement" | "conflict", runner: Runner | undefined): string {
-  if (role === "conflict") return CONFLICT_SKILL;
-  return runner === "dsh" ? `${IMPLEMENT_SKILL}\n\n${tddPersona()}` : IMPLEMENT_SKILL;
+/** The arguments a role's persona needs beyond the runner: only the drain-end readers are handed any. */
+export type PersonaArgs = {
+  implement: undefined;
+  conflict: undefined;
+  review: { base: string; axis: string };
+  summary: { base: string };
+};
+
+/**
+ * The persona a role runs under: the skill of a ticket node, or the contract of a drain-end reader
+ * built from the range it is handed. The skill nodes take no argument, so only the readers' own
+ * arguments are required by the signature.
+ */
+export function personaFor<R extends AgentRole>(
+  role: R,
+  runner: Runner | undefined,
+  ...args: PersonaArgs[R] extends undefined ? [] : [args: PersonaArgs[R]]
+): string {
+  switch (role) {
+    case "conflict":
+      return CONFLICT_SKILL;
+    case "implement":
+      return runner === "dsh" ? `${IMPLEMENT_SKILL}\n\n${tddPersona()}` : IMPLEMENT_SKILL;
+    case "review": {
+      const own = args[0] as PersonaArgs["review"];
+      return reviewPersona(own.base, own.axis);
+    }
+    case "summary": {
+      const own = args[0] as PersonaArgs["summary"];
+      return summaryPersona(own.base);
+    }
+  }
 }
 
 /** The three axes the drain-end review fans out on: one reviewer each, one report. */

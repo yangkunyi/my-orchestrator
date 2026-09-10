@@ -4,8 +4,9 @@ import { defaultAgent, type AgentRunner, type TicketAgentOpts } from "./agent.ts
 import { loadConfig } from "./config.ts";
 import { git } from "./git.ts";
 import { runNode } from "./node-entry.ts";
-import { summaryPersona, summaryTask } from "./prompt.ts";
-import { REVIEW_BASE_REL, REVIEW_MD_REL, REVIEW_TOOLS, REVIEW_WALL_MS } from "./review.ts";
+import { summaryTask } from "./prompt.ts";
+import { REVIEW_BASE_REL, REVIEW_MD_REL } from "./review.ts";
+import { roleAgent } from "./roles.ts";
 import { lastAssistantText } from "./session-log.ts";
 
 export const SUMMARY_MD_REL = "summary.md";
@@ -54,20 +55,15 @@ export async function summarizeDrain(target: string, opts: TicketAgentOpts): Pro
   const config = opts.config ?? loadConfig(target);
   const runAgent: AgentRunner = opts.runAgent ?? defaultAgent;
   try {
-    const r = await runAgent({
+    const agent = roleAgent({
+      role: "summary",
+      args: { base },
       cwd: target,
       artifactsDir: opts.artifactsDir,
-      ticketId: "drain-summary",
-      role: "summary",
-      model: config.model,
-      thinkingLevel: config.thinkingLevel,
-      runner: config.runner,
-      persona: summaryPersona(base),
+      config,
       prompt: summaryTask(base, headR.stdout.trim(), logR.ok ? logR.stdout : "", reviewMd),
-      tools: REVIEW_TOOLS,
-      useBash: true,
-      wallMs: REVIEW_WALL_MS,
     });
+    const r = await runAgent(agent.opts);
     // The runner's own final message first, as in review: the session log is the fallback for a runner
     // that does not hand one over.
     const text = r.text ?? lastAssistantText(r.sessionFile) ?? r.lastError ?? "(no summary text)";

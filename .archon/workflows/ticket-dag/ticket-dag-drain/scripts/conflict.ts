@@ -1,8 +1,8 @@
 import { existsSync } from "node:fs";
 import { join } from "node:path";
 import { defaultAgent, type AgentRunner, type TicketAgentOpts } from "./agent.ts";
-import { conflictTask, personaFor } from "./prompt.ts";
-import { ticketSessionFile } from "./session-log.ts";
+import { conflictTask } from "./prompt.ts";
+import { roleAgent } from "./roles.ts";
 import { syncWorktreeEnv } from "./worktree-env.ts";
 import { loadConfig, type PackConfig } from "./config.ts";
 import { runNode } from "./node-entry.ts";
@@ -33,19 +33,17 @@ export async function conflictTicket(
   }
   const config: PackConfig = opts.config ?? loadConfig(target);
   const runAgent: AgentRunner = opts.runAgent ?? defaultAgent;
-  console.error(`${ticket.id} session ${ticketSessionFile(opts.artifactsDir, ticket.id, "conflict")}`);
+  const agent = roleAgent({
+    role: "conflict",
+    args: { ticketId: ticket.id },
+    cwd: worktree,
+    artifactsDir: opts.artifactsDir,
+    config,
+    prompt: conflictTask(ticket.relPath),
+  });
+  console.error(`${ticket.id} session ${agent.sessionFile}`);
   try {
-    const pi = await runAgent({
-      cwd: worktree,
-      artifactsDir: opts.artifactsDir,
-      ticketId: ticket.id,
-      role: "conflict",
-      model: config.model,
-      thinkingLevel: config.thinkingLevel,
-      runner: config.runner,
-      persona: personaFor("conflict", config.runner),
-      prompt: conflictTask(ticket.relPath),
-    });
+    const pi = await runAgent(agent.opts);
     return settleAfterConflict(target, ticket, worktree, pi.lastError);
   } catch (e) {
     await fail(target, ticket, e instanceof Error ? e.message : String(e));

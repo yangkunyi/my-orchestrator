@@ -1,5 +1,5 @@
 import type { PackConfig, Runner, ThinkingLevel } from "./config.ts";
-import { ticketSessionFile } from "./session-log.ts";
+import { roleSessionFile } from "./session-log.ts";
 
 export type AgentRole = "implement" | "conflict" | "review" | "summary";
 
@@ -9,7 +9,11 @@ export const AGENT_WALL_MS = 2 * 60 * 60 * 1000;
 export type PackAgentOpts = {
   cwd: string;
   artifactsDir: string;
-  ticketId: string;
+  /**
+   * The key this role's session lives under: a Ticket id for the ticket nodes, the node's own name
+   * for the drain-end readers (one per review axis, one for the summary).
+   */
+  sessionKey: string;
   role: AgentRole;
   model: string | undefined;
   thinkingLevel: ThinkingLevel;
@@ -50,7 +54,7 @@ export function armSessionAbort(session: { abort: () => Promise<void> }, wallMs:
 }
 
 export async function noopAgent(opts: PackAgentOpts): Promise<PackAgentResult> {
-  return { sessionFile: ticketSessionFile(opts.artifactsDir, opts.ticketId, opts.role), lastError: undefined };
+  return { sessionFile: roleSessionFile(opts.artifactsDir, opts.sessionKey, opts.role), lastError: undefined };
 }
 
 export async function defaultAgent(opts: PackAgentOpts): Promise<PackAgentResult> {

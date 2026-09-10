@@ -4,14 +4,12 @@ import { defaultAgent, type AgentRunner, type TicketAgentOpts } from "./agent.ts
 import { loadConfig } from "./config.ts";
 import { git, gitOrThrow } from "./git.ts";
 import { runNode } from "./node-entry.ts";
-import { reviewPersona, reviewTask, REVIEW_AXES } from "./prompt.ts";
+import { reviewTask, REVIEW_AXES } from "./prompt.ts";
+import { roleAgent } from "./roles.ts";
 import { lastAssistantText } from "./session-log.ts";
 
 export const REVIEW_BASE_REL = "review-base";
 export const REVIEW_MD_REL = "review.md";
-export const REVIEW_WALL_MS = 30 * 60 * 1000;
-/** Bash is in there so a reviewer can read git history; the contract, not the allowlist, is read-only. */
-export const REVIEW_TOOLS = ["read", "grep", "find", "ls", "bash"];
 
 export async function writeReviewBase(target: string, artifactsDir: string): Promise<string> {
   mkdirSync(artifactsDir, { recursive: true });
@@ -59,20 +57,15 @@ export async function reviewDrain(target: string, opts: TicketAgentOpts): Promis
     REVIEW_AXES.map(async (axis, i) => {
       const title = `${i + 1}. ${axis}`;
       try {
-        const r = await runAgent({
+        const agent = roleAgent({
+          role: "review",
+          args: { axisIndex: i, base, axis },
           cwd: target,
           artifactsDir: opts.artifactsDir,
-          ticketId: `drain-review-${i + 1}`,
-          role: "review",
-          model: config.model,
-          thinkingLevel: config.thinkingLevel,
-          runner: config.runner,
-          persona: reviewPersona(base, axis),
+          config,
           prompt: reviewTask(base, head, logR.ok ? logR.stdout : ""),
-          tools: REVIEW_TOOLS,
-          useBash: true,
-          wallMs: REVIEW_WALL_MS,
         });
+        const r = await runAgent(agent.opts);
         // The runner's own final message first: reading it back out of a session log is the fallback for
         // a runner that does not hand one over (Pi writes its turn into the file it already owns).
         const text = r.text ?? lastAssistantText(r.sessionFile) ?? r.lastError ?? "(no review text)";

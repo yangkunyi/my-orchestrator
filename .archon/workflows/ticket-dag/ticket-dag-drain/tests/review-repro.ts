@@ -4,16 +4,15 @@ import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { type AgentRunner, type PackAgentOpts } from "../scripts/agent.ts";
 import { REVIEW_AXES } from "../scripts/prompt.ts";
-import { ticketSessionFile } from "../scripts/session-log.ts";
+import { roleSessionFile } from "../scripts/session-log.ts";
 import { rematchLeftovers } from "../scripts/rematch.ts";
 import {
   REVIEW_BASE_REL,
   REVIEW_MD_REL,
-  REVIEW_TOOLS,
-  REVIEW_WALL_MS,
   reviewDrain,
   writeReviewBase,
 } from "../scripts/review.ts";
+import { REVIEW_TOOLS, REVIEW_WALL_MS } from "../scripts/roles.ts";
 import {
   envWithout,
   expect,
@@ -42,7 +41,7 @@ function fakeAgent(
   const seen: PackAgentOpts[] = [];
   const run: AgentRunner = async (opts) => {
     seen.push(opts);
-    const sessionFile = ticketSessionFile(opts.artifactsDir, opts.ticketId, opts.role);
+    const sessionFile = roleSessionFile(opts.artifactsDir, opts.sessionKey, opts.role);
     mkdirSync(dirname(sessionFile), { recursive: true });
     writeFileSync(
       sessionFile,
@@ -125,7 +124,7 @@ try {
     for (const [i, opts] of seen.entries()) {
       const tag = `axis ${i + 1}`;
       expectEqual(`${tag} cwd is Main`, opts.cwd, root);
-      expectEqual(`${tag} has its own session`, opts.ticketId, `drain-review-${i + 1}`);
+      expectEqual(`${tag} has its own session`, opts.sessionKey, `drain-review-${i + 1}`);
       expectEqual(`${tag} role`, opts.role, "review");
       expectEqual(`${tag} model from config`, opts.model, "highland/deepseek-v4-flash");
       expectEqual(`${tag} thinkingLevel from config`, opts.thinkingLevel, "high");
@@ -155,7 +154,7 @@ try {
     expectEqual("three sections, one report", body.split(/^## /m).length - 1, REVIEW_AXES.length);
     expectEqual(
       "review session path",
-      ticketSessionFile(artifacts, "drain-review-2", "review"),
+      roleSessionFile(artifacts, "drain-review-2", "review"),
       join(artifacts, "sessions", "drain-review-2", "review.jsonl"),
     );
 
@@ -215,7 +214,7 @@ try {
     gitC(root, "add", "work.txt");
     gitC(root, "commit", "-m", "work");
     const fake: AgentRunner = async (opts) => ({
-      sessionFile: ticketSessionFile(opts.artifactsDir, opts.ticketId, opts.role),
+      sessionFile: roleSessionFile(opts.artifactsDir, opts.sessionKey, opts.role),
       lastError: "Request timed out.",
     });
     await reviewDrain(root, { artifactsDir: artifacts, runAgent: fake });

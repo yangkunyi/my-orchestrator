@@ -2,8 +2,9 @@ import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import type { AgentRole } from "./agent.ts";
 
-export function ticketSessionFile(artifactsDir: string, ticketId: string, role: AgentRole): string {
-  return join(artifactsDir, "sessions", ticketId, `${role}.jsonl`);
+/** Where one role's session for one session key lives: artifacts/sessions/<key>/<role>.jsonl. */
+export function roleSessionFile(artifactsDir: string, sessionKey: string, role: AgentRole): string {
+  return join(artifactsDir, "sessions", sessionKey, `${role}.jsonl`);
 }
 
 function contentText(content: unknown): string | undefined {
