@@ -6,9 +6,6 @@ import { roleSessionFile } from "./session-log.ts";
 /** The drain-end readers share one clock: review and summary read the same range and report on it. */
 export const REVIEW_WALL_MS = 30 * 60 * 1000;
 
-/** Bash is in there so a reader can fetch git history; the contract, not the allowlist, is read-only. */
-export const REVIEW_TOOLS = ["read", "grep", "find", "ls", "bash"];
-
 /**
  * What a role needs beyond the runner. The ticket nodes key their session on a Ticket; the drain-end
  * readers key theirs on the range they read, so no caller has to hand a review axis a Ticket id.
@@ -21,17 +18,18 @@ export type RoleShape = {
 };
 
 /**
- * Everything that must agree about one role: the session key it writes under, the persona it runs
- * under, the tool allowlist, whether bash is needed, and how long it may run. A node states its role
- * and its own arguments; nothing else about the role is spelled at the call site.
+ * Everything that must agree about one role and is the same for both runners: the session key it
+ * writes under, the persona it runs under, and how long it may run. A node states its role and its
+ * own arguments; nothing else about the role is spelled at the call site.
+ *
+ * What a role may do to the working tree is part of its persona contract, and a runner enforces it as
+ * far as it can: Pi mounts the drain-end readers' read-only tool allowlist (pi-session.ts), dsh has
+ * one bash tool and no sandbox and can only state the contract (dsh-agent.ts). The seam carries no
+ * option for that, because a caller cannot pass one that only one runner honours.
  */
 type RoleSpec<A> = {
   sessionKey: (args: A) => string;
   persona: (runner: Runner | undefined, args: A) => string;
-  /** undefined leaves the runner's own default: every tool, bash included. */
-  tools: string[] | undefined;
-  /** undefined leaves the runner's own default: bash is in. */
-  useBash: boolean | undefined;
   wallMs: number;
 };
 
@@ -41,29 +39,21 @@ export const ROLES: { [K in AgentRole]: RoleSpec<RoleShape[K]> } = {
     // The one ambient fact an implement node rests on lives here: the table reads the tdd tree its
     // machine carries - once, where the role's persona is composed - and hands it to the builder.
     persona: (runner) => personaFor("implement", runner, { skill: readTddSkill() }),
-    tools: undefined,
-    useBash: undefined,
     wallMs: AGENT_WALL_MS,
   },
   conflict: {
     sessionKey: (args) => args.ticketId,
     persona: (runner) => personaFor("conflict", runner),
-    tools: undefined,
-    useBash: undefined,
     wallMs: AGENT_WALL_MS,
   },
   review: {
     sessionKey: (args) => `drain-review-${args.axisIndex + 1}`,
     persona: (runner, args) => personaFor("review", runner, args),
-    tools: REVIEW_TOOLS,
-    useBash: true,
     wallMs: REVIEW_WALL_MS,
   },
   summary: {
     sessionKey: () => "drain-summary",
     persona: (runner, args) => personaFor("summary", runner, args),
-    tools: REVIEW_TOOLS,
-    useBash: true,
     wallMs: REVIEW_WALL_MS,
   },
 };
@@ -80,7 +70,11 @@ export type RoleCall<R extends AgentRole> = {
 
 export type RoleAgent = {
   opts: PackAgentOpts;
-  /** Where the runner keeps this role's session: artifacts/sessions/<session key>/<role>.jsonl. */
+  /**
+   * Diagnostics: where Pi keeps this role's session - artifacts/sessions/<session key>/<role>.jsonl.
+   * Not the answer channel (PackAgentResult.answer is), and a runner that keeps its sessions
+   * elsewhere reports its own path in PackAgentResult.sessionFile.
+   */
   sessionFile: string;
 };
 
@@ -100,8 +94,6 @@ export function roleAgent<R extends AgentRole>(call: RoleCall<R>): RoleAgent {
       runner: call.config.runner,
       persona: spec.persona(call.config.runner, call.args),
       prompt: call.prompt,
-      tools: spec.tools,
-      useBash: spec.useBash,
       wallMs: spec.wallMs,
     },
   };

@@ -1,3 +1,9 @@
+/**
+ * Pi's session file: where this pack tells Pi to keep one role's session, and how Pi's own jsonl
+ * reads back. The reader below knows Pi's row shape and only pi-session.ts uses it - dsh keeps its
+ * log where its harness does and reports that path instead. The session file is diagnostics; the
+ * answer travels on PackAgentResult.answer.
+ */
 import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import type { AgentRole } from "./agent.ts";
@@ -27,9 +33,12 @@ type Row = {
   message?: { role?: unknown; content?: unknown; errorMessage?: unknown };
 };
 
-/** One pass over the session jsonl: the last assistant text and the last errorMessage. */
-function scan(sessionFile: string): { text?: string; error?: string } {
-  if (!existsSync(sessionFile)) return {};
+/**
+ * One pass over Pi's session jsonl: the last assistant text Pi wrote and the last errorMessage. Both
+ * are values, not throws: a missing or half-written file reads as absence.
+ */
+export function readPiSession(sessionFile: string): { text: string | undefined; error: string | undefined } {
+  if (!existsSync(sessionFile)) return { text: undefined, error: undefined };
   let text: string | undefined;
   let error: string | undefined;
   for (const line of readFileSync(sessionFile, "utf8").split("\n")) {
@@ -51,12 +60,4 @@ function scan(sessionFile: string): { text?: string; error?: string } {
     if (found) text = found;
   }
   return { text, error };
-}
-
-export function lastAssistantText(sessionFile: string): string | undefined {
-  return scan(sessionFile).text;
-}
-
-export function lastAssistantError(sessionFile: string): string | undefined {
-  return scan(sessionFile).error;
 }

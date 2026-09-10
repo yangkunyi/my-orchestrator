@@ -19,23 +19,45 @@ export type PackAgentOpts = {
   thinkingLevel: ThinkingLevel;
   /** Which runtime to spend on this node. Defaults to pi; every node takes either one. */
   runner?: Runner;
-  /** The skill/contract for runners that have a system prompt. Pi carries it in the message. */
-  persona?: string;
+  /**
+   * The skill or contract this role runs under: dsh carries it as the whole system prompt, Pi folds
+   * it into the message. Required, and the only place a node's read-only contract is stated for a
+   * runner that cannot enforce it (see dsh-agent.ts).
+   */
+  persona: string;
   prompt: string;
-  tools?: string[];
-  useBash?: boolean;
   wallMs?: number;
 };
 
+/**
+ * One turn's answer. Each runner reads its own product - Pi its session jsonl, dsh its event stream -
+ * and reports what it found here, so a node reads one value and never parses another product's log.
+ */
+export type PackAnswer =
+  /** The turn's final assistant text. */
+  | { kind: "text"; text: string }
+  /** The turn produced no assistant text at all: an abort, a crash, a turn that ended before it spoke. */
+  | { kind: "none" };
+
 export type PackAgentResult = {
-  sessionFile: string;
-  lastError: string | undefined;
   /**
-   * The agent's final message. A runner that already streams its own events hands it over here;
-   * nobody should have to re-parse another product's session log to learn what an agent said.
+   * Diagnostics, not the answer: where this turn's session lives, for a human and for the jsonl a
+   * debugging operator reads. `answer` is the answer channel; never read a log back for it.
    */
-  text?: string;
+  sessionFile: string;
+  /** The turn's answer: the runner's own final text, or that it produced none. */
+  answer: PackAnswer;
+  /**
+   * The runner's own report of what went wrong on this turn (a timeout, an abort, a nonzero exit).
+   * The ticket nodes settle on it; a report node uses it as the reason a turn answered no text.
+   */
+  lastError: string | undefined;
 };
+
+/** One turn's answer from the text a runner read out of its own product. */
+export function packAnswer(text: string | undefined): PackAnswer {
+  return text === undefined ? { kind: "none" } : { kind: "text", text };
+}
 
 export type AgentRunner = (opts: PackAgentOpts) => Promise<PackAgentResult>;
 
@@ -54,7 +76,11 @@ export function armSessionAbort(session: { abort: () => Promise<void> }, wallMs:
 }
 
 export async function noopAgent(opts: PackAgentOpts): Promise<PackAgentResult> {
-  return { sessionFile: roleSessionFile(opts.artifactsDir, opts.sessionKey, opts.role), lastError: undefined };
+  return {
+    sessionFile: roleSessionFile(opts.artifactsDir, opts.sessionKey, opts.role),
+    answer: { kind: "none" },
+    lastError: undefined,
+  };
 }
 
 export async function defaultAgent(opts: PackAgentOpts): Promise<PackAgentResult> {

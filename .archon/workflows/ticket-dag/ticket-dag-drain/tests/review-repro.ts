@@ -18,7 +18,7 @@ import {
   writeArtifact,
   writeReviewBase,
 } from "../scripts/review-artifacts.ts";
-import { REVIEW_TOOLS, REVIEW_WALL_MS } from "../scripts/roles.ts";
+import { REVIEW_WALL_MS } from "../scripts/roles.ts";
 import {
   envWithout,
   expect,
@@ -40,9 +40,13 @@ function section(body: string, i: number): string {
   return nl < 0 ? "" : part.slice(nl);
 }
 
+/**
+ * A runner that answers `answer` and leaves `log` in the session file it owns. The log is there to
+ * prove the node never reads it: one answer channel means the runner's own answer is the only one.
+ */
 function fakeAgent(
-  text: string,
-  answer?: string,
+  answer: string,
+  log = answer,
 ): { run: AgentRunner; calls: () => number; all: () => PackAgentOpts[] } {
   const seen: PackAgentOpts[] = [];
   const run: AgentRunner = async (opts) => {
@@ -51,9 +55,9 @@ function fakeAgent(
     mkdirSync(dirname(sessionFile), { recursive: true });
     writeFileSync(
       sessionFile,
-      `${JSON.stringify({ type: "message", message: { role: "assistant", content: text } })}\n`,
+      `${JSON.stringify({ type: "message", message: { role: "assistant", content: log } })}\n`,
     );
-    return { sessionFile, lastError: undefined, ...(answer === undefined ? {} : { text: answer }) };
+    return { sessionFile, answer: { kind: "text", text: answer }, lastError: undefined };
   };
   return { run, calls: () => seen.length, all: () => seen };
 }
@@ -199,8 +203,22 @@ try {
       expectEqual(`${tag} model from config`, opts.model, "highland/deepseek-v4-flash");
       expectEqual(`${tag} thinkingLevel from config`, opts.thinkingLevel, "high");
       expectEqual(`${tag} runner from config`, opts.runner, "pi");
-      expectEqual(`${tag} tools`, opts.tools, REVIEW_TOOLS);
-      expectEqual(`${tag} may read git through bash`, opts.useBash, true);
+      expectEqual(
+        `${tag} opts are the seam's whole vocabulary`,
+        Object.keys(opts).sort(),
+        [
+          "artifactsDir",
+          "cwd",
+          "model",
+          "persona",
+          "prompt",
+          "role",
+          "runner",
+          "sessionKey",
+          "thinkingLevel",
+          "wallMs",
+        ],
+      );
       expectEqual(`${tag} wall`, opts.wallMs, REVIEW_WALL_MS);
       expect(`${tag} persona pins range`, opts.persona?.includes(`${base}...HEAD`) === true);
       expect(`${tag} persona is this axis only`, opts.persona?.includes(`Your axis: ${REVIEW_AXES[i]}`) === true);
@@ -239,24 +257,34 @@ try {
     expectEqual("dsh review runner", dsh[0]?.runner, "dsh");
     expect("one contract, two runners", dsh.every((o, i) => o.persona === seen[i]?.persona));
     expect("same message either way", dsh.every((o, i) => o.prompt === seen[i]?.prompt));
+    // A runner that cannot honour an option is never handed one: the read-only contract of a reviewer
+    // reaches dsh in the persona, which is the only enforcement it has (see dsh-agent-repro.ts).
+    expect("dsh is handed nothing it would ignore", dsh.every((o) => !("tools" in o) && !("useBash" in o)));
   });
 
-  // A runner that hands its final message over does not need its session log read back.
+  // One answer channel: the runner hands its answer over, and its session log is never read back - a
+  // runner whose log disagrees with its answer is the only thing the node ever sees.
   await withTarget(async (root, artifacts) => {
     await writeReviewBase(root, artifacts);
     writeFileSync(join(root, "work.txt"), "y\n");
     gitC(root, "add", "work.txt");
     gitC(root, "commit", "-m", "work");
-    const fake = fakeAgent("text from the log", "text from the runner");
+    const fake = fakeAgent("answer from the runner", "text from the session log");
     await reviewDrain(root, { artifactsDir: artifacts, runAgent: fake.run });
     const body = readOut(artifacts);
     expectEqual(
-      "the runner's own text wins",
+      "the runner's own answer is the review",
       REVIEW_AXES.map((_, i) => section(body, i).trim()),
-      REVIEW_AXES.map(() => "text from the runner"),
+      REVIEW_AXES.map(() => "answer from the runner"),
     );
-    expect("no log text survives", !body.includes("text from the log"));
+    expect("no session log text survives", !body.includes("text from the session log"));
   });
+
+  // The skeleton reads no log for the answer, so nothing in the node knows a session format at all.
+  expect(
+    "the report node never reads a session log",
+    !readFileSync(join(import.meta.dir, "../scripts/report-node.ts"), "utf8").includes("session-log"),
+  );
 
   // One axis blowing up does not take the other two down: its own section carries the error.
   await withTarget(async (root, artifacts) => {
@@ -285,12 +313,13 @@ try {
     gitC(root, "commit", "-m", "work");
     const fake: AgentRunner = async (opts) => ({
       sessionFile: roleSessionFile(opts.artifactsDir, opts.sessionKey, opts.role),
+      answer: { kind: "none" },
       lastError: "Request timed out.",
     });
     await reviewDrain(root, { artifactsDir: artifacts, runAgent: fake });
     const body = readOut(artifacts);
     expectEqual(
-      "lastError fallback",
+      "a turn with no answer falls back to the runner's failure report",
       REVIEW_AXES.map((_, i) => section(body, i).trim()),
       REVIEW_AXES.map(() => "Request timed out."),
     );

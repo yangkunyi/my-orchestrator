@@ -2,11 +2,12 @@
 /** Temp-Target repro: pack Pi SDK wiring without a live session. No Archon engine, no repo src/. */
 import { mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { AGENT_WALL_MS, armSessionAbort, noopAgent } from "../scripts/agent.ts";
+import { AGENT_WALL_MS, armSessionAbort, noopAgent, packAnswer } from "../scripts/agent.ts";
 import { composeMessage, conflictTask, implementTask, personaFor, REVIEW_AXES, reviewPersona, reviewTask } from "../scripts/prompt.ts";
+import { PI_READ_ONLY_TOOLS, piTools, piTurn } from "../scripts/pi-session.ts";
 import { proxyEnv } from "../scripts/proxy.ts";
-import { lastAssistantError, lastAssistantText, roleSessionFile } from "../scripts/session-log.ts";
-import { REVIEW_TOOLS, REVIEW_WALL_MS } from "../scripts/roles.ts";
+import { readPiSession, roleSessionFile } from "../scripts/session-log.ts";
+import { REVIEW_WALL_MS } from "../scripts/roles.ts";
 import { expect, expectEqual, mkTemp, sleep } from "./target.ts";
 
 const executeYaml = join(import.meta.dir, "../../ticket-dag-execute/ticket-dag-execute.yaml");
@@ -53,26 +54,52 @@ try {
 
     const sessionFile = roleSessionFile(artifacts, "feat/01", "implement");
     mkdirSync(join(artifacts, "sessions", "feat", "01"), { recursive: true });
+    const errorFile = join(artifacts, "sessions", "feat", "01", "error.jsonl");
     writeFileSync(
-      sessionFile,
+      errorFile,
       `${JSON.stringify({ type: "message", message: { role: "assistant", errorMessage: "Request timed out." } })}\n`,
     );
-    expectEqual("lastAssistantError", lastAssistantError(sessionFile), "Request timed out.");
-    expectEqual("missing session has no error", lastAssistantError(join(artifacts, "missing.jsonl")), undefined);
+    expectEqual("the reader takes the last errorMessage", readPiSession(errorFile).error, "Request timed out.");
+    expectEqual("a session with no text answers none", packAnswer(readPiSession(errorFile).text), {
+      kind: "none",
+    });
+    expectEqual("a missing session reads as absence, not a throw", readPiSession(join(artifacts, "missing.jsonl")), {
+      text: undefined,
+      error: undefined,
+    });
 
     const textFile = join(artifacts, "sessions", "feat", "01", "text.jsonl");
     writeFileSync(
       textFile,
       `${JSON.stringify({ type: "message", message: { role: "assistant", content: [{ type: "text", text: "looks ok" }] } })}\n`,
     );
-    expectEqual("lastAssistantText", lastAssistantText(textFile), "looks ok");
+    expectEqual("the reader takes the last assistant text", readPiSession(textFile).text, "looks ok");
+    // Pi's adapter reads its own session for the answer: this is that report, whole.
+    expectEqual("Pi's turn report answers with its session's text", piTurn(textFile, undefined), {
+      sessionFile: textFile,
+      answer: { kind: "text", text: "looks ok" },
+      lastError: undefined,
+    });
+    expectEqual("a turn with no text and an error reports both", piTurn(errorFile, undefined), {
+      sessionFile: errorFile,
+      answer: { kind: "none" },
+      lastError: "Request timed out.",
+    });
+    expectEqual(
+      "a silent session still reports why the turn ended",
+      piTurn(join(artifacts, "missing.jsonl"), "agent aborted after wall clock"),
+      {
+        sessionFile: join(artifacts, "missing.jsonl"),
+        answer: { kind: "none" },
+        lastError: "agent aborted after wall clock",
+      },
+    );
     const strFile = join(artifacts, "sessions", "feat", "01", "str.jsonl");
     writeFileSync(
       strFile,
       `${JSON.stringify({ type: "message", message: { role: "assistant", content: "plain" } })}\n`,
     );
-    expectEqual("lastAssistantText string content", lastAssistantText(strFile), "plain");
-    expectEqual("missing session has no text", lastAssistantText(join(artifacts, "missing.jsonl")), undefined);
+    expectEqual("the reader takes string content", readPiSession(strFile).text, "plain");
 
     const noop = await noopAgent({
       cwd: artifacts,
@@ -81,9 +108,11 @@ try {
       role: "implement",
       model: undefined,
       thinkingLevel: "high",
+      persona: "PERSONA",
       prompt: impl,
     });
     expectEqual("noop does not start Pi", noop.sessionFile, sessionFile);
+    expectEqual("noop answers no text", noop.answer, { kind: "none" });
     expectEqual("noop has no lastError", noop.lastError, undefined);
   } finally {
     rmSync(artifacts, { recursive: true, force: true });
@@ -93,7 +122,20 @@ try {
   expect("wall clock shorter than Archon timeout", AGENT_WALL_MS < 7_500_000);
   expectEqual("review wall 30 min", REVIEW_WALL_MS, 30 * 60 * 1000);
   expect("review wall shorter than review node timeout", REVIEW_WALL_MS < 2_000_000);
-  expectEqual("review tools can read git", REVIEW_TOOLS, ["read", "grep", "find", "ls", "bash"]);
+  expectEqual("the read-only allowlist can read git", PI_READ_ONLY_TOOLS, ["read", "grep", "find", "ls", "bash"]);
+  // Pi's own enforcement of the drain-end readers' read-only contract, and the ticket nodes' default:
+  // the seam carries no tool option, because dsh could not honour one (see dsh-agent-repro.ts).
+  expectEqual("Pi mounts the read-only allowlist for a reviewer", piTools("review"), PI_READ_ONLY_TOOLS);
+  expectEqual("Pi mounts it for the summariser too", piTools("summary"), PI_READ_ONLY_TOOLS);
+  expectEqual("an implement node takes Pi's default tools", piTools("implement"), undefined);
+  expectEqual("a conflict node takes Pi's default tools", piTools("conflict"), undefined);
+
+  // The seam's shape, which no runtime repro can reach: a caller must state the persona and cannot
+  // pass an option one adapter would drop, and the answer channel is required rather than optional.
+  const seamSrc = readFileSync(join(import.meta.dir, "../scripts/agent.ts"), "utf8");
+  expect("the seam requires a persona", /^\s*persona: string;$/m.test(seamSrc));
+  expect("the seam's answer channel is required", /^\s*answer: PackAnswer;$/m.test(seamSrc));
+  expect("the seam declares no tool allowlist", !/^\s*(tools|useBash)\??:/m.test(seamSrc));
 
   const rp = composeMessage(
     reviewPersona("abc", REVIEW_AXES[0]),
@@ -112,7 +154,8 @@ try {
     rp.includes(`Your axis: ${REVIEW_AXES[0]}`) && !rp.includes(REVIEW_AXES[1]),
   );
 
-  // One contract either way: the tools differ per runner, the text does not.
+  // One contract either way: what the role may do is stated in the persona for both runners, and
+  // only Pi can back it with a mounted allowlist.
   expect("review rules out writes", rp.includes("Never write:") && rp.includes("no commits"));
   expect("review names no Pi tool line", !rp.includes("Use read, grep, find, and ls only"));
   expect("review knows it may read git", rp.includes("git log") && rp.includes("git show"));

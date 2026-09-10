@@ -15,6 +15,7 @@ const STUB = `#!${process.execPath}
 import { mkdirSync, writeFileSync } from "node:fs";
 const seen = process.env.STUB_SEEN;
 const turnKind = process.env.STUB_TURN_KIND ?? "completed";
+const silent = process.env.STUB_SILENT === "1";
 const record = {
   argv: process.argv.slice(2),
   home: process.env.DSH_HOME,
@@ -52,7 +53,7 @@ function handle(message) {
     writeFileSync([dir, "session.v3.jsonl"].join("/"), JSON.stringify({ stub: true }) + "\\n");
     reply(message.id, { messageId: "message-1" });
     notify("session.status", { sessionId, status: "running" });
-    notify("session.event", { sessionId, event: { type: "assistant/message", seq: 11, data: { turn: 1, step: 1, message: { role: "assistant", content: [{ type: "reasoning", text: "THINKING-LEAK" }, { type: "text", text: "STUB-ANSWER" }] } } } });
+    if (!silent) notify("session.event", { sessionId, event: { type: "assistant/message", seq: 11, data: { turn: 1, step: 1, message: { role: "assistant", content: [{ type: "reasoning", text: "THINKING-LEAK" }, { type: "text", text: "STUB-ANSWER" }] } } } });
     notify("session.event", { sessionId, event: { type: "turn/end", seq: 12, data: { turn: 1, reason: { kind: turnKind } } } });
     notify("session.status", { sessionId, status: "idle" });
     return;
@@ -151,8 +152,9 @@ try {
   );
   expect("session log exists", existsSync(result.sessionFile));
   expectEqual("completed turn has no error", result.lastError, undefined);
-  expectEqual("final text comes from the event stream", result.text, "STUB-ANSWER");
-  expect("reasoning parts never leak into the answer", !(result.text ?? "").includes("THINKING-LEAK"));
+  expectEqual("the answer comes off the event stream", result.answer, { kind: "text", text: "STUB-ANSWER" });
+  const answerText = result.answer.kind === "text" ? result.answer.text : "";
+  expect("reasoning parts never leak into the answer", !answerText.includes("THINKING-LEAK"));
 
   process.env.STUB_TURN_KIND = "aborted";
   const second = await run({
@@ -164,7 +166,13 @@ try {
   const got2 = JSON.parse(readFileSync(seen, "utf8")) as Record<string, any>;
   expectEqual("configured model wins", got2.initialize.model, "custom-model");
   expectEqual("a non-completed turn is reported", second.lastError, "turn ended: aborted");
-  expect("partial text still comes back", (second.text ?? "").length > 0);
+  expectEqual("partial text still comes back", second.answer, { kind: "text", text: "STUB-ANSWER" });
+
+  // A turn that spoke no text at all is not an empty answer and not a log to re-read: it says so.
+  process.env.STUB_SILENT = "1";
+  const quiet = await run({ role: "conflict", task: "resolve the conflict", persona: personaFor("conflict", "dsh") });
+  expectEqual("a turn with no assistant text answers none", quiet.answer, { kind: "none" });
+  delete process.env.STUB_SILENT;
 
   const reviewPayload = reviewTask("abc", "head1", "c1 do a thing\n");
   const review = await run({
@@ -175,6 +183,7 @@ try {
   const got3 = JSON.parse(readFileSync(seen, "utf8")) as Record<string, any>;
   expectEqual("review message is the range payload", got3.prompt.contentBlocks[0].text, reviewPayload);
   expect("review persona pins the range", got3.persona.includes("abc...HEAD"));
+  // dsh has no allowlist to mount: the persona is the whole enforcement of this contract.
   expect(
     "review persona is read-only by instruction",
     got3.persona.includes("read-only") && got3.persona.includes("Never write:"),
@@ -182,7 +191,7 @@ try {
   expect("review persona names no Pi tool line", !got3.persona.includes("Use read, grep, find, and ls"));
   expect("review persona never tells it to spawn agents", got3.persona.includes("Do not spawn agents"));
   expect("review persona carries its axis", got3.persona.includes(`Your axis: ${REVIEW_AXES[0]}`));
-  expectEqual("review returns its text too", review.text, "STUB-ANSWER");
+  expectEqual("review returns its answer too", review.answer, { kind: "text", text: "STUB-ANSWER" });
 
   for (const [level, effort] of [
     ["off", "off"],
@@ -283,6 +292,7 @@ try {
     "DEEPSEEK_API_KEY",
     "STUB_SEEN",
     "STUB_TURN_KIND",
+    "STUB_SILENT",
   ] as const) {
     if (saved[key] === undefined) delete process.env[key];
     else process.env[key] = saved[key];

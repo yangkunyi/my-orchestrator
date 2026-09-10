@@ -9,7 +9,7 @@ import { join } from "node:path";
 import { AGENT_WALL_MS, type AgentRole } from "../scripts/agent.ts";
 import type { PackConfig } from "../scripts/config.ts";
 import { personaFor, readTddSkill, REVIEW_AXES, reviewPersona, summaryPersona } from "../scripts/prompt.ts";
-import { REVIEW_TOOLS, REVIEW_WALL_MS, ROLES, roleAgent } from "../scripts/roles.ts";
+import { REVIEW_WALL_MS, ROLES, roleAgent } from "../scripts/roles.ts";
 import { roleSessionFile } from "../scripts/session-log.ts";
 import { expect, expectEqual } from "./target.ts";
 
@@ -42,8 +42,19 @@ try {
   expectEqual("implement thinkingLevel from config", impl.opts.thinkingLevel, CONFIG.thinkingLevel);
   expectEqual("implement runner from config", impl.opts.runner, CONFIG.runner);
   expectEqual("implement prompt is the node's", impl.opts.prompt, TASK);
-  expectEqual("implement takes the runner's default tools", impl.opts.tools, undefined);
-  expectEqual("implement takes the runner's default bash", impl.opts.useBash, undefined);
+  // The seam carries only what both runners honour: no option here is one an adapter would drop.
+  expectEqual("the role table's opts are the seam's whole vocabulary", Object.keys(impl.opts).sort(), [
+    "artifactsDir",
+    "cwd",
+    "model",
+    "persona",
+    "prompt",
+    "role",
+    "runner",
+    "sessionKey",
+    "thinkingLevel",
+    "wallMs",
+  ]);
   expectEqual("implement wall clock is the ticket clock", impl.opts.wallMs, AGENT_WALL_MS);
   expectEqual("implement persona is the skill", impl.opts.persona, personaFor("implement", "pi", { skill: undefined }));
 
@@ -80,8 +91,6 @@ try {
   expectEqual("conflict session key is the Ticket", conflict.opts.sessionKey, "feat/02");
   expectEqual("conflict session file", conflict.sessionFile, join(ARTIFACTS, "sessions", "feat/02", "conflict.jsonl"));
   expectEqual("conflict persona is the skill", conflict.opts.persona, personaFor("conflict", "pi"));
-  expectEqual("conflict takes the runner's default tools", conflict.opts.tools, undefined);
-  expectEqual("conflict takes the runner's default bash", conflict.opts.useBash, undefined);
   expectEqual("conflict wall clock is the ticket clock", conflict.opts.wallMs, AGENT_WALL_MS);
 
   // A review axis is not a Ticket: its session is keyed by the axis, and its persona by the range.
@@ -95,9 +104,10 @@ try {
   });
   expectEqual("a review axis keys its own session", review.opts.sessionKey, "drain-review-2");
   expectEqual("review session file", review.sessionFile, join(ARTIFACTS, "sessions", "drain-review-2", "review.jsonl"));
-  expectEqual("review tools", review.opts.tools, REVIEW_TOOLS);
-  expectEqual("review needs bash to read git", review.opts.useBash, true);
-  expectEqual("review wall clock", review.opts.wallMs, REVIEW_WALL_MS);
+  // The read-only intent is not an option the table hands down: it is part of the persona every
+  // runner gets, and Pi backs it with its own allowlist (agent-repro.ts asserts that mapping).
+  expect("review states its read-only contract", review.opts.persona.includes("read-only"));
+  expect("review wall clock", review.opts.wallMs, REVIEW_WALL_MS);
   expectEqual("review persona is built from the range", review.opts.persona, reviewPersona("abc", REVIEW_AXES[1]));
 
   const summary = roleAgent({
@@ -110,8 +120,6 @@ try {
   });
   expectEqual("summary session key is the node's own name", summary.opts.sessionKey, "drain-summary");
   expectEqual("summary session file", summary.sessionFile, join(ARTIFACTS, "sessions", "drain-summary", "summary.jsonl"));
-  expectEqual("summary shares the reviewers' tools", summary.opts.tools, REVIEW_TOOLS);
-  expectEqual("summary may read git through bash", summary.opts.useBash, true);
   expectEqual("summary wall clock", summary.opts.wallMs, REVIEW_WALL_MS);
   expectEqual("summary persona merges the reviews", summary.opts.persona, summaryPersona("abc"));
 

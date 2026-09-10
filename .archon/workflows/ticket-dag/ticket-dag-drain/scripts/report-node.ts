@@ -1,8 +1,9 @@
 /**
  * The skeleton both drain-end report nodes run: read review-base and stop with the owner's skip line
  * when it is not there, let the node read its own input, read HEAD and the range's commit menu, run
- * the node's agents and take each answer off the runner (else its session log, else its last error),
- * write the artifact, and turn a throw from the report into the node's own error line.
+ * the node's agents and take each answer off the runner (else the runner's failure report, else the
+ * node's own fallback), write the artifact, and turn a throw from the report into the node's own
+ * error line.
  *
  * Review and summary were two copies of those six steps, differing only in the shape they produce
  * (one reviewer per axis, one summariser over review.md) and in the word their error line starts
@@ -16,14 +17,13 @@ import { git } from "./git.ts";
 import { runNode } from "./node-entry.ts";
 import { readReviewBase, writeArtifact } from "./review-artifacts.ts";
 import { roleAgent, type RoleShape } from "./roles.ts";
-import { lastAssistantText } from "./session-log.ts";
 
 /** One agent a node asks for: the role and its own arguments, the message, and the empty-answer text. */
 export type ReportAsk<R extends AgentRole> = {
   role: R;
   args: RoleShape[R];
   prompt: string;
-  /** What a runner that hands over no message, no session log and no last error leaves behind. */
+  /** What a turn that answered no text and reported no error leaves behind. */
   fallback: string;
 };
 
@@ -38,9 +38,10 @@ export type ReportRange = {
   /** The range's commit menu: "" when git could not read it, which the personas take as "(none)". */
   log: string;
   /**
-   * The one way a node runs an agent: builds the role's opts (session key, persona, tools, bash need
-   * and wall clock all come from roles.ts), runs it, and takes the answer - the runner's own final
-   * message, else its session log, else its last error, else the caller's fallback.
+   * The one way a node runs an agent: builds the role's opts (session key, persona and wall clock all
+   * come from roles.ts), runs it, and takes the answer - the runner's own answer, else its failure
+   * report, else the caller's fallback. The runner's session file is not consulted: it is diagnostics
+   * for a human, and a node that read it would only understand one runner's format.
    */
   ask: <R extends AgentRole>(call: ReportAsk<R>) => Promise<string>;
 };
@@ -104,9 +105,9 @@ export async function runReportNode(
   }: ReportAsk<R>): Promise<string> => {
     const agent = roleAgent({ role, args, cwd: target, artifactsDir: opts.artifactsDir, config, prompt });
     const r = await runAgent(agent.opts);
-    // The runner's own final message first: reading it back out of a session log is the fallback for
-    // a runner that does not hand one over.
-    return r.text ?? lastAssistantText(r.sessionFile) ?? r.lastError ?? fallback;
+    // One answer channel: the runner reads its own product and hands the answer over. Its failure
+    // report is the reason a turn answered no text; the caller's fallback is the last resort.
+    return r.answer.kind === "text" ? r.answer.text : r.lastError ?? fallback;
   };
   const range: ReportRange = {
     target,

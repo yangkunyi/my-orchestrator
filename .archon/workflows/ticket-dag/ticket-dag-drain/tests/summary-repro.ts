@@ -13,7 +13,7 @@ import {
   SUMMARY_MD_REL,
   writeReviewBase,
 } from "../scripts/review-artifacts.ts";
-import { REVIEW_TOOLS, REVIEW_WALL_MS } from "../scripts/roles.ts";
+import { REVIEW_WALL_MS } from "../scripts/roles.ts";
 import { runReportNode, type ReportNode } from "../scripts/report-node.ts";
 import { roleSessionFile } from "../scripts/session-log.ts";
 import { summarizeDrain } from "../scripts/summary.ts";
@@ -28,9 +28,13 @@ function readOut(artifacts: string): string {
 
 const REVIEWS = REVIEW_AXES.map((axis, i) => `## ${i + 1}. ${axis}\n\naxis ${i + 1} findings\n`).join("\n");
 
+/**
+ * A runner that answers `answer` and leaves `log` in the session file it owns. The log is there to
+ * prove the node never reads it: one answer channel means the runner's own answer is the only one.
+ */
 function fakeAgent(
-  text: string,
-  answer?: string,
+  answer: string,
+  log = answer,
 ): { run: AgentRunner; calls: () => number; all: () => PackAgentOpts[] } {
   const seen: PackAgentOpts[] = [];
   const run: AgentRunner = async (opts) => {
@@ -39,9 +43,9 @@ function fakeAgent(
     mkdirSync(dirname(sessionFile), { recursive: true });
     writeFileSync(
       sessionFile,
-      `${JSON.stringify({ type: "message", message: { role: "assistant", content: text } })}\n`,
+      `${JSON.stringify({ type: "message", message: { role: "assistant", content: log } })}\n`,
     );
-    return { sessionFile, lastError: undefined, ...(answer === undefined ? {} : { text: answer }) };
+    return { sessionFile, answer: { kind: "text", text: answer }, lastError: undefined };
   };
   return { run, calls: () => seen.length, all: () => seen };
 }
@@ -95,7 +99,7 @@ try {
   }
 
   await withReview(async (root, artifacts, base, head) => {
-    const fake = fakeAgent("summary from the log", "summary from the runner");
+    const fake = fakeAgent("summary from the runner", "summary from the session log");
     await summarizeDrain(root, {
       artifactsDir: artifacts,
       runAgent: fake.run,
@@ -110,8 +114,22 @@ try {
     expectEqual("summary model from config", seen?.model, "highland/deepseek-v4-flash");
     expectEqual("summary thinkingLevel from config", seen?.thinkingLevel, "high");
     expectEqual("summary runner from config", seen?.runner, "pi");
-    expectEqual("summary tools", seen?.tools, REVIEW_TOOLS);
-    expectEqual("summary may read git through bash", seen?.useBash, true);
+    expectEqual(
+      "summary opts are the seam's whole vocabulary",
+      Object.keys(seen!).sort(),
+      [
+        "artifactsDir",
+        "cwd",
+        "model",
+        "persona",
+        "prompt",
+        "role",
+        "runner",
+        "sessionKey",
+        "thinkingLevel",
+        "wallMs",
+      ],
+    );
     expectEqual("summary wall", seen?.wallMs, REVIEW_WALL_MS);
     expect("summary persona pins range", seen?.persona?.includes(`${base}...HEAD`) === true);
     expect("summary persona merges, not reviews", seen?.persona?.includes("you rank and merge, you do not review") === true);
@@ -135,7 +153,7 @@ try {
         seen?.prompt.includes(`## 3. ${REVIEW_AXES[2]}`) === true,
     );
     expectEqual("the runner's own text wins", readOut(artifacts), "summary from the runner\n");
-    expect("the log text is not used", !readOut(artifacts).includes("summary from the log"));
+    expect("the log text is not used", !readOut(artifacts).includes("summary from the session log"));
     expectEqual(
       "summary session path",
       roleSessionFile(artifacts, "drain-summary", "summary"),
@@ -146,10 +164,11 @@ try {
   await withReview(async (root, artifacts) => {
     const fake: AgentRunner = async (opts) => ({
       sessionFile: roleSessionFile(opts.artifactsDir, opts.sessionKey, opts.role),
+      answer: { kind: "none" },
       lastError: "Request timed out.",
     });
     await summarizeDrain(root, { artifactsDir: artifacts, runAgent: fake });
-    expectEqual("lastError fallback", readOut(artifacts), "Request timed out.\n");
+    expectEqual("a turn with no answer falls back to the runner's failure report", readOut(artifacts), "Request timed out.\n");
   });
 
   await withReview(async (root, artifacts) => {
@@ -220,23 +239,24 @@ try {
   // One conformance suite over the skeleton both report nodes ride. The caller's interface is the
   // same for both - (target, opts) in, one artifact out - so the steps the skeleton owns are asserted
   // once, for both: the base skip writes the owner's line and spends no agent, and the answer channel
-  // is walked past the runner's own message to the session log and to the node's fallback.
+  // is the runner's own answer, then its failure report, then the node's fallback.
   const conformance: [string, (t: string, o: TicketAgentOpts) => Promise<void>, string, string][] = [
     ["review", reviewDrain, REVIEW_MD_REL, "(no review text)"],
     ["summary", summarizeDrain, SUMMARY_MD_REL, "(no summary text)"],
   ];
+  // A runner that answers no text, reports no error, and left one in the session file it owns.
   const logged: AgentRunner = async (opts) => {
-    // A runner that hands over nothing, but had its turn written into the session file it owns.
     const sessionFile = roleSessionFile(opts.artifactsDir, opts.sessionKey, opts.role);
     mkdirSync(dirname(sessionFile), { recursive: true });
     writeFileSync(
       sessionFile,
       `${JSON.stringify({ type: "message", message: { role: "assistant", content: "answer from the session log" } })}\n`,
     );
-    return { sessionFile, lastError: undefined };
+    return { sessionFile, answer: { kind: "none" }, lastError: undefined };
   };
   const silent: AgentRunner = async (opts) => ({
     sessionFile: roleSessionFile(opts.artifactsDir, opts.sessionKey, opts.role),
+    answer: { kind: "none" },
     lastError: undefined,
   });
   for (const [name, node, rel, fallback] of conformance) {
@@ -252,12 +272,14 @@ try {
     });
 
     for (const [what, runAgent, want] of [
-      ["reads its answer back out of the session log", logged, "answer from the session log"],
+      ["never reads a session log for its answer", logged, fallback],
       ["ends the answer chain at its own fallback", silent, fallback],
     ] as [string, AgentRunner, string][]) {
       await withReview(async (root, artifacts) => {
         await node(root, { artifactsDir: artifacts, runAgent });
-        expect(`${name} ${what}`, readFileSync(join(artifacts, rel), "utf8").includes(want));
+        const body = readFileSync(join(artifacts, rel), "utf8");
+        expect(`${name} ${what}`, body.includes(want));
+        expect(`${name} leaves the log text out`, !body.includes("answer from the session log"));
       });
     }
   }

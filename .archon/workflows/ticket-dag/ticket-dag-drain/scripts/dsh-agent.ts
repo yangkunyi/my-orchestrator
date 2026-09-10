@@ -5,21 +5,21 @@
  * Where the two runners differ - whatever this adapter does that Pi's pi-session.ts does not:
  * - thinking levels: dsh's deepseek plugin knows exactly four efforts, so Pi's seven levels fold
  *   onto them through EFFORT below; Pi passes its thinking level straight through.
- * - tools / useBash: dsh ignores both. The minimal tree is fixed at one persistent bash tool and
- *   mounts no sandbox plugin, so the review node's read-only contract is instruction-only here;
- *   Pi still enforces it structurally.
+ * - the tool set: the minimal tree is fixed at one persistent bash tool and mounts no sandbox
+ *   plugin, so a read-only role is instruction-only here - the contract reaches the agent in the
+ *   persona, which is this runner's whole system prompt. Pi enforces the same contract structurally.
+ *   The seam carries no tool option for that reason.
  * - abort: this dsh subset has no cancel, so the wall clock ends the process with SIGKILL; Pi calls
  *   session.abort().
  *
  * The harness carries the persona as the whole system prompt, so the skill body travels as
- * DSH_SYSTEM_PROMPT and the ticket task as the first message.
- *
- * Only implement and conflict use this runner; the review node keeps its read-only Pi session.
+ * DSH_SYSTEM_PROMPT and the ticket task as the first message. The Target's `runner:` drives every
+ * agent node, the drain-end readers included.
  */
 import { existsSync, readFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
-import { AGENT_WALL_MS, type PackAgentOpts, type PackAgentResult } from "./agent.ts";
+import { AGENT_WALL_MS, packAnswer, type PackAgentOpts, type PackAgentResult } from "./agent.ts";
 import { DshRuntime } from "./dsh-runtime.ts";
 import type { ThinkingLevel } from "./config.ts";
 
@@ -108,15 +108,15 @@ export async function dshAgent(opts: PackAgentOpts): Promise<PackAgentResult> {
     const reason = rt.finishReason();
     return {
       sessionFile: sessionFile(),
+      answer: packAnswer(rt.lastMessage()),
       lastError: reason && reason !== "completed" ? `turn ended: ${reason}` : undefined,
-      text: rt.lastMessage(),
     };
   } catch (e) {
     const msg = e instanceof Error ? e.message : String(e);
     return {
       sessionFile: sessionFile(),
+      answer: packAnswer(rt.lastMessage()),
       lastError: aborted ? "agent aborted after wall clock" : msg,
-      text: rt.lastMessage(),
     };
   } finally {
     clearTimeout(wall);
