@@ -1,6 +1,15 @@
 import { AsyncLocalStorage } from "node:async_hooks";
 import { execFile as execFileCb } from "node:child_process";
-import { closeSync, constants, existsSync, openSync, readFileSync, unlinkSync, writeFileSync } from "node:fs";
+import {
+  appendFileSync,
+  closeSync,
+  constants,
+  existsSync,
+  openSync,
+  readFileSync,
+  unlinkSync,
+  writeFileSync,
+} from "node:fs";
 import { isAbsolute, join, resolve } from "node:path";
 import { promisify } from "node:util";
 import type { Status, Ticket } from "./tickets.ts";
@@ -137,4 +146,51 @@ export async function hasTicketMergeCommit(target: string, branch: string): Prom
 export async function removeWorktreeAndBranch(target: string, ticket: Ticket): Promise<void> {
   await git(target, ["worktree", "remove", "--force", join(target, ticket.worktreeRel)]);
   await git(target, ["branch", "-D", ticket.branch]);
+}
+
+export async function revParse(cwd: string, ref = "HEAD"): Promise<string> {
+  return gitOrThrow(cwd, ["rev-parse", ref]);
+}
+
+export async function branchExists(target: string, branch: string): Promise<boolean> {
+  return (await git(target, ["show-ref", "--verify", "--quiet", `refs/heads/${branch}`])).ok;
+}
+
+export async function integrateMainIntoWorktree(
+  worktree: string,
+  mainRef: string,
+): Promise<"ok" | "conflict" | "failed"> {
+  const r = await git(worktree, ["merge", "--no-ff", mainRef]);
+  if (r.ok) return "ok";
+  const inMerge = await git(worktree, ["rev-parse", "-q", "--verify", "MERGE_HEAD"]);
+  if (inMerge.ok) return "conflict";
+  return "failed";
+}
+
+function gitignoreHas(body: string, patterns: string[]): boolean {
+  return body.split(/\r?\n/).some((l) => patterns.includes(l.trim()));
+}
+
+async function ensureGitignoreLine(
+  target: string,
+  line: string,
+  aliases: string[],
+  message: string,
+): Promise<void> {
+  await withMergeLock(target, async () => {
+    const gi = join(target, ".gitignore");
+    const body = existsSync(gi) ? readFileSync(gi, "utf8") : "";
+    if (gitignoreHas(body, [line, ...aliases])) return;
+    appendFileSync(gi, body.endsWith("\n") || body.length === 0 ? `${line}\n` : `\n${line}\n`);
+    await gitOrThrow(target, ["add", ".gitignore"]);
+    await gitOrThrow(target, ["commit", "-m", message]);
+  });
+}
+
+export async function ensureWorktreesIgnored(target: string): Promise<void> {
+  await ensureGitignoreLine(target, "worktrees/", ["worktrees", "/worktrees/"], "chore(orchestrator): ignore worktrees/");
+}
+
+export async function ensureVenvIgnored(target: string): Promise<void> {
+  await ensureGitignoreLine(target, ".venv/", [".venv", "/.venv/"], "chore(orchestrator): ignore .venv/");
 }
