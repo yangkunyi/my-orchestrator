@@ -1,5 +1,6 @@
 import { addAttempted } from "./attempted.ts";
-import { hasTicketMergeCommit, removeWorktreeAndBranch, stamp, withMergeLock } from "./git.ts";
+import { removeWorktreeAndBranch } from "./git.ts";
+import { hasTicketMergeCommit, stamp, withMergeLock } from "./main-writes.ts";
 import { runNode } from "./node-entry.ts";
 import { writeReviewBase } from "./review.ts";
 import { leftoverInFlight, scanTickets } from "./tickets.ts";

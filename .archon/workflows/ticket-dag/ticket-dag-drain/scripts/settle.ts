@@ -1,15 +1,12 @@
 import { existsSync } from "node:fs";
 import { join } from "node:path";
+import { hasCommitsAhead, removeWorktreeAndBranch, revParse, worktreeDirty } from "./git.ts";
 import {
-  hasCommitsAhead,
   integrateMainIntoWorktree,
-  removeWorktreeAndBranch,
-  revParse,
   stamp,
   tryMerge,
   withMergeLock,
-  worktreeDirty,
-} from "./git.ts";
+} from "./main-writes.ts";
 import { runNode } from "./node-entry.ts";
 import { scanTickets, type Ticket } from "./tickets.ts";
 

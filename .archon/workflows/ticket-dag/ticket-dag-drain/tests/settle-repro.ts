@@ -3,7 +3,7 @@
 import { existsSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { beginTicket } from "../scripts/begin.ts";
-import { tryMerge } from "../scripts/git.ts";
+import { tryMerge, withMergeLock } from "../scripts/main-writes.ts";
 import { settleAfterAgent } from "../scripts/settle.ts";
 import {
   branchExists,
@@ -106,7 +106,7 @@ try {
     writeFileSync(join(root, "f"), "c\n");
     gitC(root, "add", "f");
     gitC(root, "commit", "-m", "mainline");
-    const result = await tryMerge(root, "ticket/feat/01-demo");
+    const result = await withMergeLock(root, () => tryMerge(root, "ticket/feat/01-demo"));
     expectEqual("tryMerge conflict", result, "conflict");
     expect("Main MERGE_HEAD aborted", !hasMergeHead(root));
     expectEqual("Main porcelain clean", gitC(root, "status", "--porcelain"), "");

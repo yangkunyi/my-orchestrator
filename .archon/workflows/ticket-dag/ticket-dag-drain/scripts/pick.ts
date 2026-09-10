@@ -1,5 +1,5 @@
 import { addAttempted, readAttempted } from "./attempted.ts";
-import { hasTicketMergeCommit, stamp, withMergeLock } from "./git.ts";
+import { hasTicketMergeCommit, stamp, withMergeLock } from "./main-writes.ts";
 import { runNode } from "./node-entry.ts";
 import { blockersMerged, byId, scanTickets, type Ticket } from "./tickets.ts";
 

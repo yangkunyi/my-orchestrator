@@ -11,7 +11,7 @@ import { syncWorktreeEnv } from "./worktree-env.ts";
 import { loadConfig, type PackConfig } from "./config.ts";
 import { runNode } from "./node-entry.ts";
 import { fail, settleAfterConflict } from "./settle.ts";
-import { stamp, withMergeLock } from "./git.ts";
+import { stamp, withMergeLock } from "./main-writes.ts";
 import { scanTickets } from "./tickets.ts";
 
 export async function conflictTicket(

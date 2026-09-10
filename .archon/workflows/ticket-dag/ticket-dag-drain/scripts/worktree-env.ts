@@ -2,7 +2,7 @@ import { execFile as execFileCb } from "node:child_process";
 import { existsSync } from "node:fs";
 import { delimiter, join } from "node:path";
 import { promisify } from "node:util";
-import { ensureGitignoreLine } from "./git.ts";
+import { ensureGitignoreLine } from "./main-writes.ts";
 
 const execFile = promisify(execFileCb);
 

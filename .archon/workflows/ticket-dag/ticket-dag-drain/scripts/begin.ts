@@ -1,14 +1,7 @@
 import { existsSync, mkdirSync } from "node:fs";
 import { join } from "node:path";
-import {
-  branchExists,
-  git,
-  gitOrThrow,
-  integrateMainIntoWorktree,
-  revParse,
-  stamp,
-  withMergeLock,
-} from "./git.ts";
+import { branchExists, git, gitOrThrow, revParse } from "./git.ts";
+import { integrateMainIntoWorktree, stamp, withMergeLock } from "./main-writes.ts";
 import type { Ticket } from "./tickets.ts";
 import { ensureVenvIgnored, ensureWorktreesIgnored, syncWorktreeEnv } from "./worktree-env.ts";
 
