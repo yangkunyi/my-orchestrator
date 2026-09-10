@@ -4,7 +4,7 @@
 
 **Blocked by:** 03
 
-Status: MERGING
+Status: MERGED
 
 - [ ] Empty merge and dirty / no-new-commit are FAILED, Worktree kept
 - [ ] Successful merge commit uses the same message as the CLI so rematch agrees
