@@ -7,6 +7,7 @@ import { chmodSync, existsSync, mkdirSync, readFileSync, rmSync, writeFileSync }
 import { join } from "node:path";
 import type { ThinkingLevel } from "../scripts/config.ts";
 import { dshAgent } from "../scripts/dsh-agent.ts";
+import { DshRuntime } from "../scripts/dsh-runtime.ts";
 import { implementTask, personaFor, REVIEW_AXES, reviewPersona, reviewTask } from "../scripts/prompt.ts";
 import { expect, expectEqual, expectReject, mkTemp, runScript } from "./target.ts";
 
@@ -244,6 +245,30 @@ try {
   const fallbackPersona = personaOf({ HOME: noHome });
   expect("no skill tree falls back to the inlined body", fallbackPersona.includes("Red before green."));
   expect("the fallback drops the pointer too", !fallbackPersona.includes("codebase-design"));
+
+  // The runtime module is the wire protocol alone: the stub drives it with no persona, no
+  // credentials and no pack config - only an argv, a minimal environment and an initialize handshake.
+  const bareSeen = join(work, "bare-seen.json");
+  const rt = new DshRuntime({
+    cwd: work,
+    env: { STUB_SEEN: bareSeen, DSH_HOME: home },
+    argv: ["--profile", "sdk-minimal"],
+    provider: "bare-provider",
+    model: "bare-model",
+    effort: "low",
+  });
+  await rt.run("BARE-PROMPT");
+  const bareGot = JSON.parse(readFileSync(bareSeen, "utf8")) as Record<string, any>;
+  expectEqual("runtime initialize takes the caller's cwd", bareGot.initialize.cwd, work);
+  expectEqual("runtime initialize takes the caller's provider", bareGot.initialize.provider, "bare-provider");
+  expectEqual("runtime initialize takes the caller's model", bareGot.initialize.model, "bare-model");
+  expectEqual("runtime initialize takes the caller's effort", bareGot.initialize.reasoningEffort, "low");
+  expectEqual("runtime sends the caller's prompt", bareGot.prompt.contentBlocks[0].text, "BARE-PROMPT");
+  expect("runtime needs no persona", bareGot.persona === undefined);
+  expectEqual("runtime reads the turn kind off the stream", rt.finishReason(), "completed");
+  expectEqual("runtime reads the final text off the stream", rt.lastMessage(), "STUB-ANSWER");
+  expect("runtime leaks no reasoning part", !(rt.lastMessage() ?? "").includes("THINKING-LEAK"));
+  await rt.close();
 
   console.log(JSON.stringify({ ok: true }));
 } catch (e) {
