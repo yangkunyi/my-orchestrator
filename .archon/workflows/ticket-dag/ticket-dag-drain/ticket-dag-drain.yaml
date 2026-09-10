@@ -16,3 +16,23 @@ nodes:
     always_run: true
     with:
       config: $INPUTS.config
+  - id: drain
+    depends_on: [rematch]
+    loop_group:
+      max_iterations: 500
+      until_bash: test $pick.output = "[]"
+      nodes:
+        - id: pick
+          script: pick
+          runtime: bun
+          with:
+            config: $INPUTS.config
+        - id: execute
+          include: ticket-dag-execute
+          depends_on: [pick]
+          with:
+            config: $INPUTS.config
+          fan_out:
+            items: "$pick.output"
+            as: ticket
+            join: all_done

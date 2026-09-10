@@ -1,0 +1,29 @@
+name: ticket-dag-execute
+description: |
+  Per-Ticket implement then conflict if implement stdout is resolve.
+  Not a public drain entry. Bare run is unsupported: ticket input is required.
+mutates_checkout: false
+inputs:
+  ticket:
+    required: true
+    description: Ticket id (feature/NN)
+  config:
+    default: .scratch/ticket-dag.yaml
+    description: Path to YAML with model, thinkingLevel, concurrency
+nodes:
+  - id: implement
+    script: implement
+    runtime: bun
+    timeout: 7500000
+    with:
+      ticket: $INPUTS.ticket
+      config: $INPUTS.config
+  - id: conflict
+    script: conflict
+    runtime: bun
+    timeout: 7500000
+    depends_on: [implement]
+    when: "$implement.output == 'resolve'"
+    with:
+      ticket: $INPUTS.ticket
+      config: $INPUTS.config
