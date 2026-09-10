@@ -1,6 +1,5 @@
 import { addAttempted } from "./attempted.ts";
-import { removeWorktreeAndBranch } from "./git.ts";
-import { hasTicketMergeCommit, stamp, withMergeLock } from "./main-writes.ts";
+import { completeTicket, hasTicketMergeCommit, stamp, withMergeLock } from "./main-writes.ts";
 import { runNode } from "./node-entry.ts";
 import { writeReviewBase } from "./review.ts";
 import { leftoverInFlight, scanTickets } from "./tickets.ts";
@@ -10,8 +9,7 @@ export async function rematchLeftovers(target: string, artifactsDir?: string): P
     const failedIds: string[] = [];
     for (const ticket of leftoverInFlight(scanTickets(target))) {
       if (await hasTicketMergeCommit(target, ticket.branch)) {
-        await stamp(target, ticket, "MERGED");
-        await removeWorktreeAndBranch(target, ticket);
+        await completeTicket(target, ticket);
       } else {
         await stamp(target, ticket, "FAILED");
         failedIds.push(ticket.id);

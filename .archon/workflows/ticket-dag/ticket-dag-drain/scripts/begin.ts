@@ -1,7 +1,7 @@
 import { existsSync, mkdirSync } from "node:fs";
 import { join } from "node:path";
-import { branchExists, git, gitOrThrow, revParse } from "./git.ts";
-import { integrateMainIntoWorktree, stamp, withMergeLock } from "./main-writes.ts";
+import { branchExists, git, gitOrThrow } from "./git.ts";
+import { integrateCurrentMainIntoWorktree, stamp, withMergeLock } from "./main-writes.ts";
 import type { Ticket } from "./tickets.ts";
 import { ensureVenvIgnored, ensureWorktreesIgnored, syncWorktreeEnv } from "./worktree-env.ts";
 
@@ -37,7 +37,7 @@ export async function beginTicket(target: string, ticket: Ticket): Promise<Begin
     await ensureVenvIgnored(target);
     await stamp(target, ticket, "RUNNING");
     const path = await ensureWorktree(target, ticket);
-    const integrated = await integrateMainIntoWorktree(path, await revParse(target));
+    const integrated = await integrateCurrentMainIntoWorktree(target, path);
     return { path, integrated };
   });
   if (begun.integrated === "conflict") {

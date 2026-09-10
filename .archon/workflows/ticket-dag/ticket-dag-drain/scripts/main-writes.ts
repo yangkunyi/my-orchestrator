@@ -10,7 +10,7 @@ import {
   writeFileSync,
 } from "node:fs";
 import { isAbsolute, join, resolve } from "node:path";
-import { git, gitOrThrow } from "./git.ts";
+import { git, gitOrThrow, removeWorktreeAndBranch, revParse } from "./git.ts";
 import { mergeMessage, statusLine, statusMessage, type Status } from "./ticket-line.ts";
 import type { Ticket } from "./tickets.ts";
 
@@ -109,6 +109,16 @@ export async function stamp(target: string, ticket: Ticket, status: Status): Pro
   });
 }
 
+/**
+ * Complete a Ticket whose merge commit is already on Main (ADR-0029): stamp MERGED, then drop the
+ * Worktree and branch, never re-merge. The stamp-then-remove order lives here, not in the callers.
+ */
+export async function completeTicket(target: string, ticket: Ticket): Promise<void> {
+  assertLockHeld("completeTicket");
+  await stamp(target, ticket, "MERGED");
+  await removeWorktreeAndBranch(target, ticket);
+}
+
 /** True iff Main has that Ticket's --no-ff merge commit (message + second parent on the branch). */
 export async function hasTicketMergeCommit(target: string, branch: string): Promise<boolean> {
   const log = await git(target, ["log", "--format=%P%x00%s", "HEAD"]);
@@ -160,6 +170,18 @@ export async function integrateMainIntoWorktree(
   if (r.ok) return "ok";
   if (await inMerge(worktree)) return "conflict";
   return "failed";
+}
+
+/**
+ * Put current Main onto the Ticket Worktree and report how it went. The caller keeps its own
+ * Status stamp (RUNNING, CONFLICT) and its own failure message for the outcome it gets.
+ */
+export async function integrateCurrentMainIntoWorktree(
+  target: string,
+  worktree: string,
+): Promise<"ok" | "conflict" | "failed"> {
+  assertLockHeld("integrateCurrentMainIntoWorktree");
+  return integrateMainIntoWorktree(worktree, await revParse(target));
 }
 
 function gitignoreHas(body: string, patterns: string[]): boolean {

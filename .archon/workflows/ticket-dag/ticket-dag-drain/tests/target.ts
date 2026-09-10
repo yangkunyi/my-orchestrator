@@ -4,7 +4,7 @@ import { execFileSync, spawnSync } from "node:child_process";
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { isLockHeld, tryMerge, withMergeLock } from "../scripts/main-writes.ts";
+import { isLockHeld, completeTicket, integrateCurrentMainIntoWorktree, tryMerge, withMergeLock } from "../scripts/main-writes.ts";
 import { parseStatus, type Status } from "../scripts/ticket-line.ts";
 import { scanTickets, type Ticket } from "../scripts/tickets.ts";
 
@@ -195,6 +195,17 @@ if (import.meta.main) {
     expect("worktree commit on branch", commitsAhead(join(root, ticket.worktreeRel), gitC(root, "rev-parse", "HEAD")) === 1);
     // The Main-write seam owns the lock: a merge without it refuses instead of racing.
     await expectReject("unlocked tryMerge", () => tryMerge(root, "ticket/x/01"), /must run inside withMergeLock/);
+    // The compound transitions belong to the same seam, so they refuse just as loudly.
+    await expectReject(
+      "unlocked completeTicket",
+      () => completeTicket(root, ticket),
+      /completeTicket writes Main and must run inside withMergeLock/,
+    );
+    await expectReject(
+      "unlocked integrateCurrentMainIntoWorktree",
+      () => integrateCurrentMainIntoWorktree(root, join(root, ticket.worktreeRel)),
+      /integrateCurrentMainIntoWorktree writes Main and must run inside withMergeLock/,
+    );
     await withMergeLock(root, async () => expect("lock held inside", isLockHeld()));
     expect("lock released after", !isLockHeld());
     console.log(JSON.stringify({ ok: true }));

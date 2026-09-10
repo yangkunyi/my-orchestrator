@@ -3,9 +3,10 @@
 import { existsSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { beginTicket } from "../scripts/begin.ts";
-import { tryMerge, withMergeLock } from "../scripts/main-writes.ts";
+import { integrateCurrentMainIntoWorktree, tryMerge, withMergeLock } from "../scripts/main-writes.ts";
 import { settleAfterAgent } from "../scripts/settle.ts";
 import {
+  addTicketWorktree,
   branchExists,
   commitsAhead,
   commitFile,
@@ -110,6 +111,24 @@ try {
     expectEqual("tryMerge conflict", result, "conflict");
     expect("Main MERGE_HEAD aborted", !hasMergeHead(root));
     expectEqual("Main porcelain clean", gitC(root, "status", "--porcelain"), "");
+  });
+
+  await withTarget(async (root) => {
+    writeFileSync(join(root, "f"), "a\n");
+    gitC(root, "add", "f");
+    gitC(root, "commit", "-m", "init f");
+    writeTicket(root, "feat", "01", "demo", "READY", "None");
+    commitTickets(root);
+    const ticket = ticketOf(root, "feat/01");
+    const wt = addTicketWorktree(root, ticket);
+    commitFile(wt, "f", "b\n", "ticket");
+    writeFileSync(join(root, "f"), "c\n");
+    gitC(root, "add", "f");
+    gitC(root, "commit", "-m", "mainline");
+    const integrated = await withMergeLock(root, () => integrateCurrentMainIntoWorktree(root, wt));
+    expectEqual("stage outcome when Main conflicts", integrated, "conflict");
+    expect("stage leaves the conflict in the Worktree", hasMergeHead(wt));
+    expectEqual("stage merges current Main HEAD", gitC(wt, "rev-parse", "MERGE_HEAD"), gitC(root, "rev-parse", "HEAD"));
   });
 
   await withTarget(async (root) => {

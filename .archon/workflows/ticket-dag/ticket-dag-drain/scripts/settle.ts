@@ -1,8 +1,9 @@
 import { existsSync } from "node:fs";
 import { join } from "node:path";
-import { hasCommitsAhead, removeWorktreeAndBranch, revParse, worktreeDirty } from "./git.ts";
+import { hasCommitsAhead, revParse, worktreeDirty } from "./git.ts";
 import {
-  integrateMainIntoWorktree,
+  completeTicket,
+  integrateCurrentMainIntoWorktree,
   stamp,
   tryMerge,
   withMergeLock,
@@ -30,8 +31,7 @@ async function settleMerge(
   brokenReason: string,
 ): Promise<"merged" | "failed" | "conflict"> {
   if (result === "ok") {
-    await stamp(target, ticket, "MERGED");
-    await removeWorktreeAndBranch(target, ticket);
+    await completeTicket(target, ticket);
     return "merged";
   }
   if (result === "empty") {
@@ -108,7 +108,7 @@ export async function settleAfterAgent(
     );
     if (first !== "conflict") return first;
     await stamp(target, ticket, "CONFLICT");
-    const integrated = await integrateMainIntoWorktree(worktree, await revParse(target));
+    const integrated = await integrateCurrentMainIntoWorktree(target, worktree);
     if (integrated === "failed") {
       await fail(target, ticket, "could not merge Main into Worktree");
       return "failed";
