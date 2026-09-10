@@ -15,3 +15,7 @@ Default five roles: needs-triage, needs-info, ready-for-agent, ready-for-human, 
 ### Domain docs
 
 Single-context: root `CONTEXT.md` + `docs/adr/`. See `docs/agents/domain.md`.
+
+### Grill log
+
+Machine-extracted Q&A from grilling (no model rewrite): `.scratch/grill/<session-id>.md`, also `~/.grok/grill-logs/`.
