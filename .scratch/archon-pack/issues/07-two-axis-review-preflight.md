@@ -4,7 +4,7 @@
 
 **Blocked by:** 06
 
-Status: RUNNING
+Status: FAILED
 
 - [ ] Implement text includes the blocking two-axis fanout and drops `use /code-review`
 - [ ] Conflict text has no two-axis review
