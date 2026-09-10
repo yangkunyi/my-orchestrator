@@ -8,7 +8,7 @@ import { join } from "node:path";
 import type { ThinkingLevel } from "../scripts/config.ts";
 import { dshAgent } from "../scripts/dsh-agent.ts";
 import { DshRuntime } from "../scripts/dsh-runtime.ts";
-import { implementTask, personaFor, REVIEW_AXES, reviewPersona, reviewTask } from "../scripts/prompt.ts";
+import { implementTask, personaFor, readTddSkill, REVIEW_AXES, reviewPersona, reviewTask } from "../scripts/prompt.ts";
 import { expect, expectEqual, expectReject, mkTemp, runScript } from "./target.ts";
 
 const STUB = `#!${process.execPath}
@@ -113,8 +113,14 @@ const run = ({ role, task, persona, model, level = "high" }: Call) =>
   });
 
 try {
+  // The dsh implement node's persona is composed from a skill tree the caller names; this run points
+  // at its own stub tree, so no assertion here depends on the machine's pi skills being installed.
+  const skill = {
+    dir: join(work, "skills", "tdd"),
+    body: "---\nname: tdd\ndescription: stub\n---\n\nRed before green.\n\nTest only at pre-agreed seams.\n\nRead the codebase-design skill for the vocabulary.\n",
+  };
   const task = implementTask("tickets/01-demo.md");
-  const result = await run({ role: "implement", task, persona: personaFor("implement", "dsh") });
+  const result = await run({ role: "implement", task, persona: personaFor("implement", "dsh", { skill }) });
   const got = JSON.parse(readFileSync(seen, "utf8")) as Record<string, any>;
 
   expectEqual("stub launched with the minimal profile", got.argv.join(" "), "--profile sdk-minimal");
@@ -125,7 +131,7 @@ try {
   expect("persona carries the seams rule", got.persona.includes("Test only at pre-agreed seams."));
   expect("persona drops the out-of-scope pointer", !got.persona.includes("codebase-design"));
   expect("persona keeps the examples reachable", got.persona.includes("tests.md"));
-  expect("persona names the skill tree it came from", got.persona.includes(".pi/agent/skills/tdd"));
+  expect("persona names the skill tree it came from", got.persona.includes(skill.dir));
   expectEqual("initialize cwd", got.initialize.cwd, work);
   expectEqual("initialize provider", got.initialize.provider, "deepseek-official");
   expectEqual("initialize model defaults", got.initialize.model, "deepseek-flash");
@@ -215,36 +221,31 @@ try {
   expect("credentials are required", bareOut.threw === true);
   expect("and the error names what to set", (bareOut.message ?? "").includes("needs DEEPSEEK_BASE_URL"));
 
-  // The dsh implement persona reads the skill off pi's tree at run time and drops the one paragraph
-  // that is out of scope for a ticket-executing node. homedir() ignores process.env.HOME, so both
-  // cases run in children, like the credentials probe above.
-  const skillHome = mkTemp("pack-dsh-skills-");
-  mkdirSync(join(skillHome, ".pi", "agent", "skills", "tdd"), { recursive: true });
-  writeFileSync(
-    join(skillHome, ".pi", "agent", "skills", "tdd", "SKILL.md"),
-    "---\nname: tdd\ndescription: stub\n---\n\nFAKE-RED-BEFORE-GREEN.\n\nRead the codebase-design skill for the vocabulary.\n",
-  );
-  const personaProbe = join(work, "persona.ts");
-  writeFileSync(
-    personaProbe,
-    `import { personaFor } from ${JSON.stringify(join(import.meta.dir, "../scripts/prompt.ts"))};\n` +
-      `console.log(JSON.stringify({ persona: personaFor("implement", "dsh") }));\n`,
-  );
-  const personaOf = (env: { HOME: string }): string => {
-    const proc = runScript(personaProbe, work, env);
-    const out = JSON.parse((proc.stdout || "{}").trim().split("\n").pop() ?? "{}") as { persona?: string };
-    return out.persona ?? "";
-  };
-  const readPersona = personaOf({ HOME: skillHome });
-  expect("the skill body is read at run time", readPersona.includes("FAKE-RED-BEFORE-GREEN."));
-  expect("the out-of-scope pointer is filtered out", !readPersona.includes("codebase-design"));
+  // The dsh implement persona's tdd section is a pure function of the skill the caller hands it:
+  // the tree-found and the tree-absent branch are both asserted here, with no child and no HOME.
+  const suppliedPersona = personaFor("implement", "dsh", { skill });
+  expect("the supplied skill body feeds the persona", suppliedPersona.includes("Red before green."));
+  expect("the out-of-scope pointer is filtered out", !suppliedPersona.includes("codebase-design"));
+  expect("the persona names the tree it came from", suppliedPersona.includes(skill.dir));
   expect(
-    "the persona names the tree it came from",
-    readPersona.includes(join(skillHome, ".pi", "agent", "skills", "tdd")),
+    "the persona frames the skill's siblings",
+    suppliedPersona.includes("tests.md") && suppliedPersona.includes("mocking.md"),
   );
-  const fallbackPersona = personaOf({ HOME: noHome });
+
+  // The reader is the only place the filesystem is touched, and absence is a value, not a throw.
+  const treeDir = join(work, "tree-with-skill");
+  mkdirSync(treeDir, { recursive: true });
+  writeFileSync(join(treeDir, "SKILL.md"), skill.body);
+  const found = personaFor("implement", "dsh", { skill: readTddSkill(treeDir) });
+  expect("the reader finds a tree on disk", found.includes("Red before green."));
+  expect("and the persona names that tree", found.includes(treeDir));
+
+  const missingTree = join(work, "no-such-tree");
+  expectEqual("a missing tree reads as undefined, not a thrown error", readTddSkill(missingTree), undefined);
+  const fallbackPersona = personaFor("implement", "dsh", { skill: readTddSkill(missingTree) });
   expect("no skill tree falls back to the inlined body", fallbackPersona.includes("Red before green."));
   expect("the fallback drops the pointer too", !fallbackPersona.includes("codebase-design"));
+  expect("a supplied skill and an absent one are different personas", fallbackPersona !== suppliedPersona);
 
   // The runtime module is the wire protocol alone: the stub drives it with no persona, no
   // credentials and no pack config - only an argv, a minimal environment and an initialize handshake.

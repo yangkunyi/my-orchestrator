@@ -121,11 +121,28 @@ try {
     new Set(REVIEW_AXES.map((axis) => reviewPersona("abc", axis))).size,
     REVIEW_AXES.length,
   );
+  // The dsh implement persona's tdd section is built from a skill the caller hands in, so the test
+  // pins the composition without reading whatever skill tree this machine happens to have.
+  const tddSkill = {
+    dir: "/skills/tdd",
+    body: "---\nname: tdd\ndescription: stub\n---\n\nRed before green.\n\nConsult the codebase-design skill for the vocabulary.\n",
+  };
   expect("Pi implement persona is the skill alone", !personaFor("implement", "pi").includes("Red before green."));
-  expect("dsh implement persona carries the tdd body", personaFor("implement", "dsh").includes("Red before green."));
+  expect(
+    "dsh implement persona carries the tdd body",
+    personaFor("implement", "dsh", { skill: tddSkill }).includes("Red before green."),
+  );
   expect(
     "dsh implement persona drops the codebase-design pointer",
-    !personaFor("implement", "dsh").includes("codebase-design"),
+    !personaFor("implement", "dsh", { skill: tddSkill }).includes("codebase-design"),
+  );
+  expect(
+    "dsh implement persona names the tree it came from",
+    personaFor("implement", "dsh", { skill: tddSkill }).includes("/skills/tdd"),
+  );
+  expect(
+    "an absent skill falls back to the inlined body",
+    personaFor("implement", "dsh", { skill: undefined }).includes("Red before green."),
   );
   expect("both implement personas stay the same skill", personaFor("implement", "pi").startsWith("Implement the work described by the user"));
 

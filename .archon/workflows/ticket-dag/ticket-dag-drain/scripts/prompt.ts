@@ -1,4 +1,4 @@
-import { readFileSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import { STATUSES } from "./ticket-line.ts";
@@ -79,53 +79,72 @@ Ask: "What's the public interface, and which seams should we test?"
 - **One slice at a time.** One seam, one test, one minimal implementation per cycle.
 - **Refactoring is not part of the loop.** It belongs to the review stage, not the red → green implementation cycle.`;
 
-/** Where the tdd skill lives: the same tree pi's own loader reads. */
+/** Where the tdd skill lives by default: the same tree pi's own loader reads. */
 const TDD_DIR = join(homedir(), ".pi", "agent", "skills", "tdd");
 
+/** The tdd skill as the persona builders receive it: the body, and the tree it came from. */
+export type TddSkill = { dir: string; body: string };
+
 /**
- * The dsh implement persona carries the tdd skill's own body, read at run time from the tree pi's
- * loader uses, so the two runners cannot disagree about the skill and nothing is re-copied by hand.
- * Pi needs none of this: its session prompt advertises the skill catalog and its read tool opens the
- * file. The inlined TDD_SKILL is the fallback for a machine with no pi skill tree.
+ * Reads the tdd skill off the tree the caller names. An absent SKILL.md is a stated outcome
+ * (undefined), not an exception for the persona to swallow.
  */
-function tddPersona(): string {
-  try {
-    const body = readFileSync(join(TDD_DIR, "SKILL.md"), "utf8")
-      .replace(/^---\n[\s\S]*?\n---\n/, "")
-      .split("\n\n")
-      .filter((para) => !para.includes("codebase-design"))
-      .join("\n\n")
-      .trim();
-    if (!body) return TDD_SKILL;
-    return `The tdd skill, in full, from ${TDD_DIR}. Its siblings tests.md and mocking.md live in that directory: read either with bash when the test needs it.\n\n${body}`;
-  } catch {
-    return TDD_SKILL;
-  }
+export function readTddSkill(dir: string = TDD_DIR): TddSkill | undefined {
+  const file = join(dir, "SKILL.md");
+  return existsSync(file) ? { dir, body: readFileSync(file, "utf8") } : undefined;
 }
 
-/** The arguments a role's persona needs beyond the runner: only the drain-end readers are handed any. */
+/**
+ * The dsh implement persona's skill section, built from the skill a caller hands it, so the two
+ * runners cannot disagree about the skill and nothing is re-copied by hand. Pi needs none of this:
+ * its session prompt advertises the skill catalog and its read tool opens the file. The inlined
+ * TDD_SKILL is the fallback when there is no skill, or its body is empty after filtering.
+ */
+export function tddPersona(skill: TddSkill | undefined): string {
+  if (skill === undefined) return TDD_SKILL;
+  const body = skill.body
+    .replace(/^---\n[\s\S]*?\n---\n/, "")
+    .split("\n\n")
+    .filter((para) => !para.includes("codebase-design"))
+    .join("\n\n")
+    .trim();
+  if (!body) return TDD_SKILL;
+  return `The tdd skill, in full, from ${skill.dir}. Its siblings tests.md and mocking.md live in that directory: read either with bash when the test needs it.\n\n${body}`;
+}
+
+/** The arguments a role's persona needs beyond the runner: the dsh skill, or the drain-end range. */
 export type PersonaArgs = {
-  implement: undefined;
+  implement: { skill: TddSkill | undefined };
   conflict: undefined;
   review: { base: string; axis: string };
   summary: { base: string };
 };
 
+/** The roles with no further input take no argument; implement's skill may be left to the default. */
+type PersonaRest<R extends AgentRole> = R extends "implement"
+  ? [args?: PersonaArgs["implement"]]
+  : PersonaArgs[R] extends undefined
+    ? []
+    : [args: PersonaArgs[R]];
+
 /**
  * The persona a role runs under: the skill of a ticket node, or the contract of a drain-end reader
- * built from the range it is handed. The skill nodes take no argument, so only the readers' own
- * arguments are required by the signature.
+ * built from the range it is handed. The dsh skill is the caller's to supply; omitting it reads the
+ * machine's pi skill tree, the one default this pack assumes.
  */
 export function personaFor<R extends AgentRole>(
   role: R,
   runner: Runner | undefined,
-  ...args: PersonaArgs[R] extends undefined ? [] : [args: PersonaArgs[R]]
+  ...args: PersonaRest<R>
 ): string {
   switch (role) {
     case "conflict":
       return CONFLICT_SKILL;
-    case "implement":
-      return runner === "dsh" ? `${IMPLEMENT_SKILL}\n\n${tddPersona()}` : IMPLEMENT_SKILL;
+    case "implement": {
+      if (runner !== "dsh") return IMPLEMENT_SKILL;
+      const own = args[0] as PersonaArgs["implement"] | undefined;
+      return `${IMPLEMENT_SKILL}\n\n${tddPersona(own === undefined ? readTddSkill() : own.skill)}`;
+    }
     case "review": {
       const own = args[0] as PersonaArgs["review"];
       return reviewPersona(own.base, own.axis);
