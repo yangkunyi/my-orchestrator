@@ -4,17 +4,23 @@
 
 **Blocked by:** None
 
-Status: READY
+Status: MERGED
 
-- [ ] `recoverLeftovers` lives in the Git contract module, not `status.ts`. `status.ts` may re-export for one cycle so `run.ts` can stay untouched (ticket 03 deletes the re-export).
-- [ ] `settleAfterAgent` and `settleAfterConflict` share one ok / empty / fail / remove path. No copied block.
-- [ ] `tryMerge` still reports `"ok" | "conflict" | "failed" | "empty"` as git facts. Status is decided only in the contract.
+- [x] `recoverLeftovers` lives in the Git contract module, not `status.ts`. `status.ts` may re-export for one cycle so `run.ts` can stay untouched (ticket 03 deletes the re-export).
+- [x] `settleAfterAgent` and `settleAfterConflict` share one ok / empty / fail / remove path. No copied block.
+- [x] `tryMerge` still reports `"ok" | "conflict" | "failed" | "empty"` as git facts. Status is decided only in the contract.
 - [ ] Git helpers that write Main (`commitFiles`, `tryMerge`, `createWorktree`, `removeWorktreeAndBranch`, `ensureGitignoreLine`) do not take the lock themselves. `withMergeLock` is held at contract / scheduler / stamp.
-- [ ] `hasCommitsAhead` vs current Main and `tryMerge` `"empty"` both stay (ADR-0023). They are one named step inside the contract, not two unrelated callers.
-- [ ] Existing `scripts/empty-merge-repro.mjs` and `scripts/leftover-merged-repro.mjs` still pass. Add the smallest check that leftover whose branch is not in Main becomes FAILED and keeps the Worktree.
-- [ ] Do not edit `run.ts` except if a re-export forces an import path — prefer no `run.ts` change.
-- [ ] Do not invent Worktree env, Run process, or Pi adapter work (tickets 02 / 04 / 05).
-- [ ] `npx tsc` clean. Do not commit.
+- [x] `hasCommitsAhead` vs current Main and `tryMerge` `"empty"` both stay (ADR-0023). They are one named step inside the contract, not two unrelated callers.
+- [x] Existing `scripts/empty-merge-repro.mjs` and `scripts/leftover-merged-repro.mjs` still pass. Add the smallest check that leftover whose branch is not in Main becomes FAILED and keeps the Worktree.
+- [x] Do not edit `run.ts` except if a re-export forces an import path — prefer no `run.ts` change.
+- [x] Do not invent Worktree env, Run process, or Pi adapter work (tickets 02 / 04 / 05).
+- [x] `npx tsc` clean. Do not commit.
+
+## Comments
+
+Landed in `601bde6` (human, this repo was not drained). `src/contract.ts` owns begin / settle / leftover. `status.ts` is stamp only.
+
+Leftover: `ensureGitignoreLine` still takes `withMergeLock`. ALS re-entry on `withMergeLock` stayed because `stamp` (and `fail` → `stamp`) nest under the contract lock. `commitFiles` / `tryMerge` / `createWorktree` / `removeWorktreeAndBranch` do not take the lock.
 
 ## Files
 

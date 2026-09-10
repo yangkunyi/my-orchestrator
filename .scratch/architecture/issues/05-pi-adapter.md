@@ -4,13 +4,17 @@
 
 **Blocked by:** 02, 04
 
-Status: BLOCKED
+Status: MERGED
 
-- [ ] `runPi` does not call `uv sync`. PATH prepend comes from the Worktree module (spawnHook may stay as a one-liner importing Worktree PATH).
-- [ ] `listRoleSessions` is not defined in `agent.ts`. Inspect already reads Run records (ticket 04).
-- [ ] `scripts/session-persist.mjs` and `scripts/session-error.mjs` still pass (error parse may stay next to the adapter; listing does not).
-- [ ] Do not change Git contract, drain scheduler, or Run detach.
-- [ ] `npx tsc` clean. Do not commit.
+- [x] `runPi` does not call `uv sync`. PATH prepend comes from the Worktree module (spawnHook may stay as a one-liner importing Worktree PATH).
+- [x] `listRoleSessions` is not defined in `agent.ts`. Inspect already reads Run records (ticket 04).
+- [x] `scripts/session-persist.mjs` and `scripts/session-error.mjs` still pass (error parse may stay next to the adapter; listing does not).
+- [x] Do not change Git contract, drain scheduler, or Run detach.
+- [x] `npx tsc` clean. Do not commit.
+
+## Comments
+
+Landed in `601bde6`. `src/agent.ts` is Pi: session file, prompt, dispose, `lastAssistantError`. `runPi` spawnHook prepends Worktree `.venv` via `prependVenvBin`. Listing lives in `journal.ts`.
 
 ## Files
 

@@ -6,15 +6,19 @@ ADR-0027 is already in the working tree (`syncWorktreeEnv`, `prependVenvBin`, ba
 
 **Blocked by:** None
 
-Status: READY
+Status: MERGED
 
-- [ ] New module (one file is enough) owns sync + PATH prepend. `agent.ts` may re-export for one cycle so `run.ts` / `runPi` still compile (tickets 03 / 05 delete the re-export).
-- [ ] Create/remove still use `git.ts` primitives. This ticket does not change merge-lock ownership (ticket 01).
-- [ ] `uv sync --frozen` after create (lock already released) and before each agent session remains the rule. Failure throws; caller stamps FAILED and keeps the Worktree.
-- [ ] Skip when no `pyproject.toml`. No `--extra` / `--all-extras`. No `PYTHONPATH`.
-- [ ] `scripts/venv-path-check.mjs` still passes: Run `childEnv` PATH has no Main `.venv`; sync `--frozen` creates Worktree `.venv`; no pyproject skips; missing lockfile throws.
-- [ ] Do not rewrite `run.ts` (ticket 03 wires create → ready). Do not shrink `runPi` to Pi-only (ticket 05).
-- [ ] `npx tsc` clean. Do not commit.
+- [x] New module (one file is enough) owns sync + PATH prepend. `agent.ts` may re-export for one cycle so `run.ts` / `runPi` still compile (tickets 03 / 05 delete the re-export).
+- [x] Create/remove still use `git.ts` primitives. This ticket does not change merge-lock ownership (ticket 01).
+- [x] `uv sync --frozen` after create (lock already released) and before each agent session remains the rule. Failure throws; caller stamps FAILED and keeps the Worktree.
+- [x] Skip when no `pyproject.toml`. No `--extra` / `--all-extras`. No `PYTHONPATH`.
+- [x] `scripts/venv-path-check.mjs` still passes: Run `childEnv` PATH has no Main `.venv`; sync `--frozen` creates Worktree `.venv`; no pyproject skips; missing lockfile throws.
+- [x] Do not rewrite `run.ts` (ticket 03 wires create → ready). Do not shrink `runPi` to Pi-only (ticket 05).
+- [x] `npx tsc` clean. Do not commit.
+
+## Comments
+
+Landed in `601bde6`. `src/worktree.ts`: `syncWorktreeEnv`, `prependVenvBin`. Create/remove stay in `git.ts`. ADR-0027.
 
 ## Files
 

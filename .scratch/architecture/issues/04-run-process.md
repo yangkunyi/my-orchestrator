@@ -4,14 +4,18 @@
 
 **Blocked by:** None
 
-Status: READY
+Status: MERGED
 
-- [ ] `childEnv` / `spawnDetachedRun` / `reexecForProxy` live next to Run records (same module or `journal.ts` + thin `proxy` kept only if it still earns the deletion test). Duplicate `NODE_USE_ENV_PROXY` checks (cli gate + reexec guard) collapse to one.
-- [ ] Inspect does not import `agent.ts`. Role jsonl listing (`implement.jsonl` / `conflict.jsonl` only) lives with Run records.
-- [ ] `inspect.ts` does not duplicate `readMeta`. Use the Journal/Run reader.
-- [ ] `scripts/http-proxy-repro.mjs` and `scripts/inspect-repro.mjs` still pass. `scripts/session-error.mjs` listing check still passes if it imported `listRoleSessions` — update the import.
-- [ ] Do not change Git contract, Worktree env, drain loop, or `runPi` prompts.
-- [ ] `npx tsc` clean. Do not commit.
+- [x] `childEnv` / `spawnDetachedRun` / `reexecForProxy` live next to Run records (same module or `journal.ts` + thin `proxy` kept only if it still earns the deletion test). Duplicate `NODE_USE_ENV_PROXY` checks (cli gate + reexec guard) collapse to one.
+- [x] Inspect does not import `agent.ts`. Role jsonl listing (`implement.jsonl` / `conflict.jsonl` only) lives with Run records.
+- [x] `inspect.ts` does not duplicate `readMeta`. Use the Journal/Run reader.
+- [x] `scripts/http-proxy-repro.mjs` and `scripts/inspect-repro.mjs` still pass. `scripts/session-error.mjs` listing check still passes if it imported `listRoleSessions` — update the import.
+- [x] Do not change Git contract, Worktree env, drain loop, or `runPi` prompts.
+- [x] `npx tsc` clean. Do not commit.
+
+## Comments
+
+Landed in `601bde6`. Process + records in `src/journal.ts`. `src/proxy.ts` re-exports for scripts. `src/cli.ts` parses flags and calls `startRun`. Inspect reads `journal.ts` only.
 
 ## Files
 

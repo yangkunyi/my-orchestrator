@@ -4,14 +4,18 @@
 
 **Blocked by:** 01, 02
 
-Status: BLOCKED
+Status: MERGED
 
-- [ ] `runOne` / Ticket execution is not a stack of ADR lines in the drain loop. Drain does not call `uv sync` or Pi itself.
-- [ ] `prepareTarget` is not invoked from `cli.ts` if `run` already calls it (or the reverse: exactly one call per process start).
-- [ ] `recoverLeftovers` imported from Git contract, not `status.ts`.
-- [ ] `scripts/drain-repro.mjs` still passes with injected `work` that only stamps MERGED.
-- [ ] Do not change Git contract verdicts, Worktree env rules, Run detach, or Pi session layout.
-- [ ] `npx tsc` clean. Do not commit.
+- [x] `runOne` / Ticket execution is not a stack of ADR lines in the drain loop. Drain does not call `uv sync` or Pi itself.
+- [x] `prepareTarget` is not invoked from `cli.ts` if `run` already calls it (or the reverse: exactly one call per process start).
+- [x] `recoverLeftovers` imported from Git contract, not `status.ts`.
+- [x] `scripts/drain-repro.mjs` still passes with injected `work` that only stamps MERGED.
+- [x] Do not change Git contract verdicts, Worktree env rules, Run detach, or Pi session layout.
+- [x] `npx tsc` clean. Do not commit.
+
+## Comments
+
+Landed in `601bde6`. `src/run.ts`: `executeTicket` is READY → MERGED or FAILED. `prepareTarget` once at `run` start. `recoverLeftovers` from `contract.ts`.
 
 ## Files
 
