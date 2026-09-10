@@ -48,5 +48,5 @@ if (import.meta.main) {
   if (!artifactsDir) throw new Error("ARTIFACTS_DIR is required");
   const config = loadConfig(target, process.env.INPUTS_CONFIG);
   const picked = await pickStartable(target, { concurrency: config.concurrency, artifactsDir });
-  console.log(JSON.stringify(picked.map((t) => t.id)));
+  process.stdout.write(JSON.stringify(picked.map((t) => t.id)));
 }
