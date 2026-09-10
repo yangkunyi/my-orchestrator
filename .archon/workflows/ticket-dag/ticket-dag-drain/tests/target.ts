@@ -4,6 +4,7 @@ import { execFileSync, spawnSync } from "node:child_process";
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { parseStatus, type Status } from "../scripts/ticket-line.ts";
 import { scanTickets, type Ticket } from "../scripts/tickets.ts";
 
 export function mkTemp(prefix = "pack-"): string {
@@ -91,9 +92,9 @@ export function writeTicket(
   return rel;
 }
 
-export function statusOf(root: string, rel: string): string {
-  const body = readFileSync(join(root, rel), "utf8");
-  return body.match(/^(?:\*\*)?Status\s*:(?:\*\*)?\s*(\S+)/im)?.[1] ?? "";
+/** Read the Ticket's Status through the same reader the pack uses - no second regex in the tests. */
+export function statusOf(root: string, rel: string): Status {
+  return parseStatus(readFileSync(join(root, rel), "utf8"));
 }
 
 export function commitTickets(root: string, message = "tickets"): void {
