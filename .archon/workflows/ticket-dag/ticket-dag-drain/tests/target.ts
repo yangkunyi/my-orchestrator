@@ -4,6 +4,7 @@ import { execFileSync, spawnSync } from "node:child_process";
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { isLockHeld, tryMerge, withMergeLock } from "../scripts/main-writes.ts";
 import { parseStatus, type Status } from "../scripts/ticket-line.ts";
 import { scanTickets, type Ticket } from "../scripts/tickets.ts";
 
@@ -36,6 +37,18 @@ export function expectThrow(name: string, fn: () => unknown, re: RegExp): void {
     return;
   }
   throw new Error(`${name}: expected throw`);
+}
+
+/** expectThrow for async code: awaits fn and requires it to reject. */
+export async function expectReject(name: string, fn: () => Promise<unknown>, re: RegExp): Promise<void> {
+  try {
+    await fn();
+  } catch (e) {
+    const msg = e instanceof Error ? e.message : String(e);
+    if (!re.test(msg)) throw new Error(`${name}: rejected ${JSON.stringify(msg)}`);
+    return;
+  }
+  throw new Error(`${name}: expected rejection`);
 }
 
 export function sleep(ms: number): Promise<void> {
@@ -180,6 +193,10 @@ if (import.meta.main) {
     expectEqual("ticket id", ticket.id, "feat/01");
     expectEqual("status read back", statusOf(root, rel), "READY");
     expect("worktree commit on branch", commitsAhead(join(root, ticket.worktreeRel), gitC(root, "rev-parse", "HEAD")) === 1);
+    // The Main-write seam owns the lock: a merge without it refuses instead of racing.
+    await expectReject("unlocked tryMerge", () => tryMerge(root, "ticket/x/01"), /must run inside withMergeLock/);
+    await withMergeLock(root, async () => expect("lock held inside", isLockHeld()));
+    expect("lock released after", !isLockHeld());
     console.log(JSON.stringify({ ok: true }));
   } catch (e) {
     console.log(JSON.stringify({ ok: false, error: e instanceof Error ? e.message : String(e) }));
