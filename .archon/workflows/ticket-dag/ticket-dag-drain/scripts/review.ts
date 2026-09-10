@@ -3,12 +3,12 @@ import { join } from "node:path";
 import {
   defaultAgent,
   lastAssistantText,
-  reexecForProxy,
   type AgentRunner,
   type TicketAgentOpts,
 } from "./agent.ts";
 import { loadConfig } from "./config.ts";
 import { git, gitOrThrow } from "./git.ts";
+import { runNode } from "./node-entry.ts";
 
 export const REVIEW_BASE_REL = "review-base";
 export const REVIEW_MD_REL = "review.md";
@@ -103,12 +103,11 @@ export async function reviewDrain(target: string, opts: TicketAgentOpts): Promis
 }
 
 export async function runReviewCli(): Promise<void> {
-  reexecForProxy();
-  const artifactsDir = process.env.ARTIFACTS_DIR;
-  if (!artifactsDir) throw new Error("ARTIFACTS_DIR is required");
-  const target = process.cwd();
-  const config = loadConfig(target, process.env.INPUTS_CONFIG);
-  await reviewDrain(target, { artifactsDir, config });
+  await runNode({
+    artifacts: true,
+    proxy: true,
+    run: ({ target, artifactsDir, config }) => reviewDrain(target, { artifactsDir, config }),
+  });
 }
 
 if (import.meta.main) {

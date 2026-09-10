@@ -1,6 +1,6 @@
-import { loadConfig } from "./config.ts";
 import { addAttempted, readAttempted } from "./attempted.ts";
 import { hasTicketMergeCommit, stamp, withMergeLock } from "./git.ts";
+import { runNode } from "./node-entry.ts";
 import { blockersMerged, byId, scanTickets, type Ticket } from "./tickets.ts";
 
 export type PickOpts = {
@@ -43,10 +43,11 @@ export async function pickStartable(target: string, opts: PickOpts): Promise<Tic
 }
 
 if (import.meta.main) {
-  const target = process.cwd();
-  const artifactsDir = process.env.ARTIFACTS_DIR;
-  if (!artifactsDir) throw new Error("ARTIFACTS_DIR is required");
-  const config = loadConfig(target, process.env.INPUTS_CONFIG);
-  const picked = await pickStartable(target, { concurrency: config.concurrency, artifactsDir });
-  process.stdout.write(JSON.stringify(picked.map((t) => t.id)));
+  await runNode({
+    artifacts: true,
+    run: async ({ target, artifactsDir, config }) => {
+      const picked = await pickStartable(target, { concurrency: config.concurrency, artifactsDir });
+      return JSON.stringify(picked.map((t) => t.id));
+    },
+  });
 }

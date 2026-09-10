@@ -1,6 +1,6 @@
 import { addAttempted } from "./attempted.ts";
-import { loadConfig } from "./config.ts";
 import { hasTicketMergeCommit, removeWorktreeAndBranch, stamp, withMergeLock } from "./git.ts";
+import { runNode } from "./node-entry.ts";
 import { writeReviewBase } from "./review.ts";
 import { leftoverInFlight, scanTickets } from "./tickets.ts";
 
@@ -22,9 +22,8 @@ export async function rematchLeftovers(target: string, artifactsDir?: string): P
 }
 
 if (import.meta.main) {
-  const target = process.cwd();
-  const artifactsDir = process.env.ARTIFACTS_DIR;
-  if (!artifactsDir) throw new Error("ARTIFACTS_DIR is required");
-  loadConfig(target, process.env.INPUTS_CONFIG);
-  await rematchLeftovers(target, artifactsDir);
+  await runNode({
+    artifacts: true,
+    run: ({ target, artifactsDir }) => rematchLeftovers(target, artifactsDir),
+  });
 }

@@ -3,13 +3,13 @@ import { join } from "node:path";
 import {
   conflictPrompt,
   defaultAgent,
-  reexecForProxy,
   ticketSessionFile,
   type AgentRunner,
   type TicketAgentOpts,
 } from "./agent.ts";
 import { syncWorktreeEnv } from "./worktree-env.ts";
 import { loadConfig, type PackConfig } from "./config.ts";
+import { runNode } from "./node-entry.ts";
 import { fail, settleAfterConflict } from "./settle.ts";
 import { stamp, withMergeLock } from "./git.ts";
 import { scanTickets } from "./tickets.ts";
@@ -56,15 +56,13 @@ export async function conflictTicket(
 }
 
 export async function runConflictCli(): Promise<void> {
-  reexecForProxy();
-  const ticketId = process.env.INPUTS_TICKET?.trim();
-  if (!ticketId) throw new Error("INPUTS_TICKET is required");
-  const artifactsDir = process.env.ARTIFACTS_DIR;
-  if (!artifactsDir) throw new Error("ARTIFACTS_DIR is required");
-  const target = process.cwd();
-  const config = loadConfig(target, process.env.INPUTS_CONFIG);
-  const result = await conflictTicket(target, ticketId, { artifactsDir, config });
-  process.stdout.write(`${result}\n`);
+  await runNode({
+    ticket: true,
+    artifacts: true,
+    proxy: true,
+    run: async ({ target, ticketId, artifactsDir, config }) =>
+      `${await conflictTicket(target, ticketId, { artifactsDir, config })}\n`,
+  });
 }
 
 if (import.meta.main) {

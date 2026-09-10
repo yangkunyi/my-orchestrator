@@ -10,6 +10,7 @@ import {
   withMergeLock,
   worktreeDirty,
 } from "./git.ts";
+import { runNode } from "./node-entry.ts";
 import { scanTickets, type Ticket } from "./tickets.ts";
 
 export type SettleResult = "merged" | "failed" | "resolve";
@@ -134,13 +135,14 @@ export async function settleAfterAgent(
 }
 
 if (import.meta.main) {
-  const target = process.cwd();
-  const ticketId = process.env.INPUTS_TICKET?.trim();
-  if (!ticketId) throw new Error("INPUTS_TICKET is required");
-  const ticket = scanTickets(target).find((t) => t.id === ticketId);
-  if (!ticket) throw new Error(`ticket not found: ${ticketId}`);
-  const worktree = join(target, ticket.worktreeRel);
-  if (!existsSync(worktree)) throw new Error(`worktree missing: ${worktree}`);
-  const result = await settleAfterAgent(target, ticket, worktree);
-  process.stdout.write(`${result}\n`);
+  await runNode({
+    ticket: true,
+    run: async ({ target, ticketId }) => {
+      const ticket = scanTickets(target).find((t) => t.id === ticketId);
+      if (!ticket) throw new Error(`ticket not found: ${ticketId}`);
+      const worktree = join(target, ticket.worktreeRel);
+      if (!existsSync(worktree)) throw new Error(`worktree missing: ${worktree}`);
+      return `${await settleAfterAgent(target, ticket, worktree)}\n`;
+    },
+  });
 }
