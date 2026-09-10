@@ -16,6 +16,7 @@ function log(msg: string): void {
   console.error(msg);
 }
 
+/** Stamp FAILED in its own transaction when a node calls it; re-enters the settle transaction. */
 export async function fail(target: string, ticket: Ticket, reason: string): Promise<void> {
   await withMergeLock(target, async () => {
     log(`${ticket.id} FAILED: ${reason}`);
@@ -42,6 +43,10 @@ async function settleMerge(
   return "failed";
 }
 
+/**
+ * Mark MERGING and merge, inside the caller's transaction: another writer must not slip between
+ * the stamp and the merge. settleAfterAgent and settleAfterConflict open that transaction.
+ */
 async function mergeOntoMain(
   target: string,
   ticket: Ticket,
@@ -70,6 +75,7 @@ export async function settleAfterConflict(
     await fail(target, ticket, "worktree dirty after conflict agent");
     return "failed";
   }
+  // The caller opens the transaction: mergeOntoMain's stamp and merge are one atomic step.
   return withMergeLock(target, async () => {
     const second = await mergeOntoMain(
       target,
@@ -97,6 +103,8 @@ export async function settleAfterAgent(
     return "failed";
   }
 
+  // The caller opens the transaction for the whole conflict route: stamping CONFLICT, integrating
+  // current Main and re-merging must not be split by another writer.
   return withMergeLock(target, async () => {
     const first = await mergeOntoMain(
       target,

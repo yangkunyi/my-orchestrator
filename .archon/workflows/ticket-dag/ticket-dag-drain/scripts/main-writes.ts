@@ -15,8 +15,9 @@ import { mergeMessage, statusLine, statusMessage, type Status } from "./ticket-l
 import type { Ticket } from "./tickets.ts";
 
 /**
- * The Main-write seam. Every function here either takes the lock itself or asserts it is
- * already held, so the ordering rule lives in this module instead of in a comment.
+ * The Main-write seam. Every function here writes Main and asserts the caller already holds the
+ * lock; only withMergeLock takes it, so the caller opens the transaction where a sequence of
+ * writes has to be atomic.
  */
 const lockHeld = new AsyncLocalStorage<true>();
 
@@ -99,14 +100,13 @@ function setStatusInFile(absPath: string, status: Status): void {
   writeFileSync(absPath, statusLine(readFileSync(absPath, "utf8"), status));
 }
 
-/** Status transition on Main: rewrite the line, commit it, and take the lock. */
+/** Status transition on Main: rewrite the line and commit it, inside the caller's transaction. */
 export async function stamp(target: string, ticket: Ticket, status: Status): Promise<void> {
-  await withMergeLock(target, async () => {
-    setStatusInFile(ticket.absPath, status);
-    await gitOrThrow(target, ["add", ticket.relPath]);
-    await gitOrThrow(target, ["commit", "-m", statusMessage(ticket.id, status)]);
-    ticket.status = status;
-  });
+  assertLockHeld("stamp");
+  setStatusInFile(ticket.absPath, status);
+  await gitOrThrow(target, ["add", ticket.relPath]);
+  await gitOrThrow(target, ["commit", "-m", statusMessage(ticket.id, status)]);
+  ticket.status = status;
 }
 
 /**
@@ -188,19 +188,21 @@ function gitignoreHas(body: string, patterns: string[]): boolean {
   return body.split(/\r?\n/).some((l) => patterns.includes(l.trim()));
 }
 
-/** Append one ignore line to the Target .gitignore and commit it on Main. */
+/**
+ * Append one ignore line to the Target .gitignore and commit it on Main, inside the caller's
+ * transaction: the read, the append and the commit must not be split by another writer.
+ */
 export async function ensureGitignoreLine(
   target: string,
   line: string,
   aliases: string[],
   message: string,
 ): Promise<void> {
-  await withMergeLock(target, async () => {
-    const gi = join(target, ".gitignore");
-    const body = existsSync(gi) ? readFileSync(gi, "utf8") : "";
-    if (gitignoreHas(body, [line, ...aliases])) return;
-    appendFileSync(gi, body.endsWith("\n") || body.length === 0 ? `${line}\n` : `\n${line}\n`);
-    await gitOrThrow(target, ["add", ".gitignore"]);
-    await gitOrThrow(target, ["commit", "-m", message]);
-  });
+  assertLockHeld("ensureGitignoreLine");
+  const gi = join(target, ".gitignore");
+  const body = existsSync(gi) ? readFileSync(gi, "utf8") : "";
+  if (gitignoreHas(body, [line, ...aliases])) return;
+  appendFileSync(gi, body.endsWith("\n") || body.length === 0 ? `${line}\n` : `\n${line}\n`);
+  await gitOrThrow(target, ["add", ".gitignore"]);
+  await gitOrThrow(target, ["commit", "-m", message]);
 }

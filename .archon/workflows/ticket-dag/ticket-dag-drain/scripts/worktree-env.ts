@@ -24,6 +24,7 @@ export async function syncWorktreeEnv(worktree: string): Promise<void> {
   }
 }
 
+/** Writes Main, so it stays inside the caller's transaction: beginTicket holds it. */
 export async function ensureWorktreesIgnored(target: string): Promise<void> {
   await ensureGitignoreLine(target, "worktrees/", ["worktrees", "/worktrees/"], "chore(orchestrator): ignore worktrees/");
 }

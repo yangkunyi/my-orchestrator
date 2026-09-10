@@ -31,6 +31,8 @@ function result(worktree: string, outcome: BeginOutcome, reason?: string): Begin
 }
 
 export async function beginTicket(target: string, ticket: Ticket): Promise<BeginResult> {
+  // One transaction: the RUNNING stamp, the new Worktree and its base (current Main) must describe
+  // the same Main commit, and the .gitignore commits go with them.
   const begun = await withMergeLock(target, async () => {
     await ensureWorktreesIgnored(target);
     await ensureVenvIgnored(target);
@@ -43,7 +45,10 @@ export async function beginTicket(target: string, ticket: Ticket): Promise<Begin
     return result(begun.path, RESOLVE);
   }
   if (begun.integrated === "failed") {
-    await stamp(target, ticket, "FAILED");
+    // Its own transaction: the begin lock is released before the env sync, which must not hold it.
+    await withMergeLock(target, async () => {
+      await stamp(target, ticket, "FAILED");
+    });
     return result(begun.path, "failed", "could not merge Main into Worktree");
   }
   try {
@@ -51,7 +56,10 @@ export async function beginTicket(target: string, ticket: Ticket): Promise<Begin
     return result(begun.path, "ready");
   } catch (e) {
     const reason = e instanceof Error ? e.message : String(e);
-    await stamp(target, ticket, "FAILED");
+    // Same as the failure above: its own transaction, after the lock was released.
+    await withMergeLock(target, async () => {
+      await stamp(target, ticket, "FAILED");
+    });
     return result(begun.path, "failed", reason);
   }
 }

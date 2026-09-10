@@ -3,8 +3,15 @@
 import { existsSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { beginTicket } from "../scripts/begin.ts";
-import { integrateCurrentMainIntoWorktree, tryMerge, withMergeLock } from "../scripts/main-writes.ts";
+import {
+  ensureGitignoreLine,
+  integrateCurrentMainIntoWorktree,
+  stamp,
+  tryMerge,
+  withMergeLock,
+} from "../scripts/main-writes.ts";
 import { settleAfterAgent } from "../scripts/settle.ts";
+import { ensureWorktreesIgnored } from "../scripts/worktree-env.ts";
 import {
   addTicketWorktree,
   branchExists,
@@ -13,6 +20,7 @@ import {
   commitTickets,
   expect,
   expectEqual,
+  expectReject,
   gitC,
   hasMergeHead,
   runScript,
@@ -129,6 +137,49 @@ try {
     expectEqual("stage outcome when Main conflicts", integrated, "conflict");
     expect("stage leaves the conflict in the Worktree", hasMergeHead(wt));
     expectEqual("stage merges current Main HEAD", gitC(wt, "rev-parse", "MERGE_HEAD"), gitC(root, "rev-parse", "HEAD"));
+  });
+
+  await withTarget(async (root) => {
+    const rel = writeTicket(root, "feat", "01", "demo", "READY", "None");
+    commitTickets(root);
+    const ticket = ticketOf(root, "feat/01");
+    // One policy: every Main writer asserts the caller's transaction, stamp and .gitignore too.
+    await expectReject(
+      "unlocked stamp",
+      () => stamp(root, ticket, "RUNNING"),
+      /stamp writes Main and must run inside withMergeLock/,
+    );
+    expectEqual("rejected stamp wrote no Status", statusOf(root, rel), "READY");
+    expectEqual("rejected stamp committed nothing", gitC(root, "log", "-1", "--format=%s"), "tickets");
+    await expectReject(
+      "unlocked ensureGitignoreLine",
+      () =>
+        ensureGitignoreLine(
+          root,
+          "worktrees/",
+          ["worktrees", "/worktrees/"],
+          "chore(orchestrator): ignore worktrees/",
+        ),
+      /ensureGitignoreLine writes Main and must run inside withMergeLock/,
+    );
+    expect("rejected ignore line wrote no file", !existsSync(join(root, ".gitignore")));
+    // The wrapper hands the caller's lock straight to the writer, so it refuses just as loudly.
+    await expectReject(
+      "unlocked ensureWorktreesIgnored",
+      () => ensureWorktreesIgnored(root),
+      /ensureGitignoreLine writes Main and must run inside withMergeLock/,
+    );
+    await withMergeLock(root, () => ensureWorktreesIgnored(root));
+    expectEqual("ignore line landed under the caller's lock", readFileSync(join(root, ".gitignore"), "utf8"), "worktrees/\n");
+    expectEqual(
+      "ignore line commit message",
+      gitC(root, "log", "-1", "--format=%s"),
+      "chore(orchestrator): ignore worktrees/",
+    );
+    // The transaction the caller opens around a stamp writes Status and message exactly as before.
+    await withMergeLock(root, () => stamp(root, ticket, "RUNNING"));
+    expectEqual("stamped Status", statusOf(root, rel), "RUNNING");
+    expectEqual("stamp message", gitC(root, "log", "-1", "--format=%s"), "orchestrator: feat/01 Status RUNNING");
   });
 
   await withTarget(async (root) => {

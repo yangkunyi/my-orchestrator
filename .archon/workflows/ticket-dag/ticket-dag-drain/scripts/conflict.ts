@@ -23,9 +23,9 @@ export async function conflictTicket(
     await fail(target, ticket, `worktree missing: ${worktree}`);
     return "failed";
   }
-  await withMergeLock(target, async () => {
-    await stamp(target, ticket, "RESOLVING");
-  });
+  // RESOLVING is one Main write and the agent run below stays outside the lock, so this is the
+  // whole transaction.
+  await withMergeLock(target, () => stamp(target, ticket, "RESOLVING"));
   try {
     await syncWorktreeEnv(worktree);
   } catch (e) {
