@@ -4,7 +4,7 @@
 
 **Blocked by:** 04
 
-**Status:** BLOCKED
+Status: READY
 
 - [ ] Only public workflow name is `ticket-dag-drain`
 - [ ] Rematch then loop until pick empty; `max_iterations` 500; pick honors `concurrency`
