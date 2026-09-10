@@ -4,7 +4,7 @@
 
 **Blocked by:** 02
 
-**Status:** BLOCKED
+Status: READY
 
 - [ ] First start creates the Worktree from Main HEAD after the RUNNING stamp
 - [ ] FAILED resume reuses tree and branch, integrates current Main, keeps dirty files
