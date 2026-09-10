@@ -11,6 +11,7 @@ import {
 } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { noopAgent } from "../scripts/agent.ts";
 import { rematchLeftovers } from "../scripts/rematch.ts";
 import { pickStartable } from "../scripts/pick.ts";
 import { conflictTicket } from "../scripts/conflict.ts";
@@ -80,17 +81,8 @@ function ticketOf(root: string, id: string) {
   return t;
 }
 
-function runScript(
-  script: string,
-  root: string,
-  env: Record<string, string | undefined>,
-): { stdout: string; stderr: string; status: number | null } {
-  const r = spawnSync(process.execPath, [script], {
-    cwd: root,
-    encoding: "utf8",
-    env: { ...process.env, ...env },
-  });
-  return { stdout: r.stdout ?? "", stderr: r.stderr ?? "", status: r.status };
+function agentOpts(artifacts: string) {
+  return { artifactsDir: artifacts, runAgent: noopAgent };
 }
 
 async function drainUntilEmpty(
@@ -106,8 +98,8 @@ async function drainUntilEmpty(
     if (picked.length === 0) break;
     const batch = await Promise.all(
       picked.map(async (t) => {
-        const token = await implementTicket(root, t.id);
-        if (token === "resolve") return conflictTicket(root, t.id);
+        const token = await implementTicket(root, t.id, agentOpts(artifacts));
+        if (token === "resolve") return conflictTicket(root, t.id, agentOpts(artifacts));
         return token;
       }),
     );
@@ -138,12 +130,11 @@ async function withTarget(
 }
 
 try {
-  await withTarget(async (root) => {
+  await withTarget(async (root, artifacts) => {
     const rel = writeTicket(root, "feat", "01", "demo", "READY", "None");
     commitTickets(root);
-    const proc = runScript(implementScript, root, { INPUTS_TICKET: "feat/01" });
-    expectEqual("empty branch stdout token", proc.stdout, "failed\n");
-    expectEqual("git-contract FAILED exit 0", proc.status, 0);
+    const token = await implementTicket(root, "feat/01", agentOpts(artifacts));
+    expectEqual("empty branch stdout token", token, "failed");
     expectEqual("empty branch Status", statusOf(root, rel), "FAILED");
     const ticket = ticketOf(root, "feat/01");
     expect("Worktree kept", existsSync(join(root, ticket.worktreeRel)), ticket.worktreeRel);
@@ -156,7 +147,7 @@ try {
     const proc = spawnSync(process.execPath, [implementScript], {
       cwd: root,
       encoding: "utf8",
-      env,
+      env: { ...env, NODE_USE_ENV_PROXY: "1" },
     });
     expect("bare implement without ticket is unsupported", (proc.status ?? 1) !== 0, proc.status);
     expect("error names missing ticket", (proc.stderr ?? "").includes("INPUTS_TICKET is required"));
@@ -169,10 +160,23 @@ try {
     const proc = spawnSync(process.execPath, [conflictScript], {
       cwd: root,
       encoding: "utf8",
-      env,
+      env: { ...env, NODE_USE_ENV_PROXY: "1" },
     });
     expect("bare conflict without ticket is unsupported", (proc.status ?? 1) !== 0, proc.status);
     expect("conflict error names missing ticket", (proc.stderr ?? "").includes("INPUTS_TICKET is required"));
+  });
+
+  await withTarget(async (root) => {
+    writeTicket(root, "feat", "01", "demo", "READY", "None");
+    commitTickets(root);
+    const { ARTIFACTS_DIR: _drop, ...env } = process.env;
+    const proc = spawnSync(process.execPath, [implementScript], {
+      cwd: root,
+      encoding: "utf8",
+      env: { ...env, INPUTS_TICKET: "feat/01", NODE_USE_ENV_PROXY: "1" },
+    });
+    expect("implement requires artifacts dir", (proc.status ?? 1) !== 0, proc.status);
+    expect("error names missing artifacts", (proc.stderr ?? "").includes("ARTIFACTS_DIR is required"));
   });
 
   await withTarget(async (root, artifacts) => {
@@ -193,7 +197,7 @@ try {
     expectEqual("same drain does not re-pick just-FAILED", after.map((t) => t.id), []);
   });
 
-  await withTarget(async (root) => {
+  await withTarget(async (root, artifacts) => {
     writeFileSync(join(root, "conflict.txt"), "base\n");
     gitC(root, "add", "conflict.txt");
     gitC(root, "commit", "-m", "base conflict file");
@@ -213,12 +217,11 @@ try {
     writeFileSync(join(root, "conflict.txt"), "from-main\n");
     gitC(root, "add", "conflict.txt");
     gitC(root, "commit", "-m", "main conflict");
-    const token = await implementTicket(root, "feat/01");
+    const token = await implementTicket(root, "feat/01", agentOpts(artifacts));
     expectEqual("resume-conflict implement token", token, "resolve");
     expectEqual("status still RUNNING until conflict node", statusOf(root, rel), "RUNNING");
-    const proc = runScript(conflictScript, root, { INPUTS_TICKET: "feat/01" });
-    expectEqual("conflict stdout token", proc.stdout, "failed\n");
-    expectEqual("conflict FAILED exit 0", proc.status, 0);
+    const conflictToken = await conflictTicket(root, "feat/01", agentOpts(artifacts));
+    expectEqual("conflict stdout token", conflictToken, "failed");
     expectEqual("conflict stamps FAILED", statusOf(root, rel), "FAILED");
     expect("Worktree kept after unresolved conflict", existsSync(wt));
   });
