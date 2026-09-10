@@ -33,10 +33,11 @@ export function conflictPrompt(ticketRelPath: string): string {
   return `${CONFLICT_SKILL}\n\n${ticketRelPath}\n`;
 }
 
-// ponytail: a trimmed copy of ~/.pi/agent/skills/tdd/SKILL.md. dsh's minimal tree has no skill
-// loader, and the pack is copied to machines that may not have that file at all - so the body
-// travels with the pack, like IMPLEMENT_SKILL/CONFLICT_SKILL already do. Only the loader metadata
-// and the references to other pi skills (tests.md, mocking.md, /codebase-design) were dropped.
+// ponytail: the tdd skill body, inline. Only the loader metadata was dropped (pi scans it to decide
+// when to offer the skill; dsh has no scanner). The two pointers to further pi material survive as
+// conditional reads - that tree is exactly what pi itself keeps on-demand, and dsh has bash, so it
+// can read them when this machine ships them. Not inlined: ~/.pi/agent/skills/tdd/{tests,mocking}.md,
+// ~/.pi/agent/skills/codebase-design/ (and what it references), tdd/agents/openai.yaml (pi subagents).
 // Re-copy by hand if the skill changes.
 const TDD_SKILL = `The tdd skill, in full:
 
@@ -50,6 +51,8 @@ When exploring the codebase, read \`CONTEXT.md\` (if it exists) so test names an
 
 Tests verify behavior through public interfaces, not implementation details. Code can change entirely; tests shouldn't. A good test reads like a specification — "user can checkout with valid cart" tells you exactly what capability exists — and survives refactors because it doesn't care about internal structure.
 
+Examples and mocking guidelines live with the pi skills, if this machine has them: read \`~/.pi/agent/skills/tdd/tests.md\` or \`~/.pi/agent/skills/tdd/mocking.md\` with bash when the test needs either.
+
 ## Seams — where tests go
 
 A **seam** is the public boundary you test at: the interface where you observe behavior without reaching inside. Tests live at seams, never against internals.
@@ -57,6 +60,8 @@ A **seam** is the public boundary you test at: the interface where you observe b
 **Test only at pre-agreed seams.** Before writing any test, write down the seams under test and confirm them. No test is written at an unconfirmed seam. You can't test everything — agreeing the seams up front is how testing effort lands on the critical paths and complex logic instead of every edge case.
 
 Ask: "What's the public interface, and which seams should we test?"
+
+When the shape of that interface is itself in question — how deep the module is, where the seam belongs, what the interface should expose — read \`~/.pi/agent/skills/codebase-design/SKILL.md\` with bash if this machine has it: it is the shared source of the module, interface, depth, seam, adapter, leverage and locality terms, and it is a reference to consult, not a session to run.
 
 ## Anti-patterns
 

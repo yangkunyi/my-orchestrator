@@ -113,6 +113,8 @@ try {
   expect("persona carries the implement skill", got.persona.includes("Implement the work described by the user"));
   expect("persona carries the tdd rules", got.persona.includes("Red before green."));
   expect("persona carries the seams rule", got.persona.includes("Test only at pre-agreed seams."));
+  expect("persona keeps the optional references reachable", got.persona.includes("codebase-design/SKILL.md"));
+  expect("persona keeps the examples reachable", got.persona.includes("tests.md"));
   expectEqual("initialize cwd", got.initialize.cwd, work);
   expectEqual("initialize provider", got.initialize.provider, "deepseek-official");
   expectEqual("initialize model defaults", got.initialize.model, "deepseek-flash");
