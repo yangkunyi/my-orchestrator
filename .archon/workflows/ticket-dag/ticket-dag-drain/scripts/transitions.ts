@@ -13,7 +13,7 @@
  *   MERGING   -> MERGED    completeTicket (main-writes) inside that same transaction.
  *   MERGING   -> CONFLICT  settleAfterAgent, stamped before Main is integrated into the Worktree.
  *   MERGING   -> FAILED    settleAfterAgent's merge outcomes, each its own one-stamp transaction.
- *   CONFLICT  -> RESOLVING the conflict node stamps it; that node is another card's footprint this round.
+ *   CONFLICT  -> RESOLVING markResolving: one Main write; the turn it hands off to stays outside the lock.
  *   RESOLVING -> MERGED    settleAfterConflict -> completeTicket, one transaction.
  *   RESOLVING -> FAILED    settleAfterConflict's outcomes, each its own one-stamp transaction.
  *   in flight -> MERGED or FAILED  recoverLeftover: MERGED iff Main already has the merge commit.
@@ -159,6 +159,15 @@ async function mergeOntoMain(
   }
   await stamp(target, ticket, "MERGING");
   return settleMerge(target, ticket, await tryMerge(target, ticket.branch), brokenReason);
+}
+
+/**
+ * CONFLICT -> RESOLVING: one Main write, and the agent turn this verb hands off to stays outside the
+ * lock, so this is the whole transaction (ADR-0042). The conflict node calls it before it re-syncs the
+ * Worktree environment and runs the turn.
+ */
+export async function markResolving(target: string, ticket: Ticket): Promise<void> {
+  await withMergeLock(target, () => stamp(target, ticket, "RESOLVING"));
 }
 
 export async function settleAfterConflict(

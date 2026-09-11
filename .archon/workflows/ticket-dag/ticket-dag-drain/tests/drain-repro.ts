@@ -261,6 +261,80 @@ try {
     expectEqual("conflict records the attempt too", statusOf(root, rel), "FAILED");
   });
 
+  // The conflict node's own first Main write: the Ticket goes RESOLVING before its turn runs. That is
+  // the one edge the conflict body used to stamp for itself; it is markResolving's now, and the turn
+  // is where it is observable - the Ticket must already be out of CONFLICT when the agent starts.
+  await withTarget(async (root, artifacts) => {
+    const rel = writeTicket(root, "feat", "01", "one", "READY", "None");
+    commitTickets(root);
+    addTicketWorktree(root, ticketOf(root, "feat/01"));
+    let during = "";
+    await conflictTicket(root, "feat/01", {
+      artifactsDir: artifacts,
+      runAgent: async () => {
+        during = statusOf(root, rel);
+        return {
+          sessionFile: join(artifacts, "conflict.jsonl"),
+          answer: { kind: "none" },
+          lastError: undefined,
+        };
+      },
+    });
+    expectEqual("the conflict node stamps RESOLVING before its turn", during, "RESOLVING");
+  });
+
+  // Each ticket node settles through its own route, and the reason its FAILED carries names that route.
+  // A turn can leave a dirty Worktree for the settle of either node, so the two reasons ("worktree
+  // dirty after implement" / "worktree dirty after conflict agent") are what tells settleAfterAgent and
+  // settleAfterConflict apart: a node given the other's settle would say the other's reason.
+  await withTarget(async (root, artifacts) => {
+    const rel = writeTicket(root, "feat", "01", "one", "READY", "None");
+    commitTickets(root);
+    const saw: string[] = [];
+    const realError = console.error;
+    console.error = (...args: unknown[]) => {
+      saw.push(args.map(String).join(" "));
+    };
+    try {
+      const token = await implementTicket(root, "feat/01", {
+        artifactsDir: artifacts,
+        runAgent: async (opts) => {
+          // The turn ran and left an uncommitted file: settleAfterAgent's own dirty-tree route.
+          writeFileSync(join(opts.cwd, "leftover.txt"), "x\n");
+          return {
+            sessionFile: join(artifacts, "implement.jsonl"),
+            answer: { kind: "none" },
+            lastError: undefined,
+          };
+        },
+      });
+      expectEqual("a dirty implement turn is this Ticket's outcome", token, "failed");
+      expect(
+        "and the reason is the implement settle's, not the conflict node's",
+        saw.some((l) => l.includes("FAILED: worktree dirty after implement")),
+        saw.join(" | "),
+      );
+      saw.length = 0;
+      const conflictToken = await conflictTicket(root, "feat/01", {
+        artifactsDir: artifacts,
+        runAgent: async () => ({
+          sessionFile: join(artifacts, "conflict.jsonl"),
+          answer: { kind: "none" },
+          lastError: undefined,
+        }),
+      });
+      expectEqual("a dirty conflict turn is this Ticket's outcome", conflictToken, "failed");
+      expect(
+        "and the reason is the conflict settle's, not the implement node's",
+        saw.some((l) => l.includes("FAILED: worktree dirty after conflict agent")),
+        saw.join(" | "),
+      );
+    } finally {
+      console.error = realError;
+    }
+    expectEqual("the Ticket is FAILED", statusOf(root, rel), "FAILED");
+  });
+
   // The other route, so the two can never collapse into one: a turn that ran and failed keeps the git
   // contract's outcome, the node returns instead of throwing, and the turn's own error is the reason.
   await withTarget(async (root, artifacts) => {
