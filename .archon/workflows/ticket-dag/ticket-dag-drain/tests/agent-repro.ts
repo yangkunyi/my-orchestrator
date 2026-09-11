@@ -5,7 +5,7 @@ import { join } from "node:path";
 import { AGENT_WALL_MS, armSessionAbort, defaultAgent, noopAgent, packAnswer, RunnerUnavailable } from "../scripts/agent.ts";
 import { composeMessage, conflictPersona, conflictTask, implementPersona, implementTask, REVIEW_AXES, reviewPersona, reviewTask } from "../scripts/prompt.ts";
 import { PI_READ_ONLY_TOOLS, piSpawnHook, piTools, piTurn, readPiSession, roleSessionFile } from "../scripts/pi-session.ts";
-import { proxyEnv } from "../scripts/proxy.ts";
+import { proxyEnv, reexecForProxy } from "../scripts/node-entry.ts";
 import { REVIEW_WALL_MS } from "../scripts/roles.ts";
 import { sessionEnv, sessionSpawnEnv } from "../scripts/worktree-env.ts";
 import { expect, expectEqual, mkTemp, sleep } from "./target.ts";
@@ -284,6 +284,30 @@ try {
   expectEqual("NODE_USE_ENV_PROXY at process start", env.NODE_USE_ENV_PROXY, "1");
   expectEqual("does not copy httpProxy over existing HTTP_PROXY", env.HTTP_PROXY, "http://already.set");
   expect("proxyEnv does not invent httpProxy", !("httpProxy" in env));
+
+  // The re-exec a node that can call Pi runs: this node again, same argv[1:], under proxyEnv(). The spawn
+  // and exit are injected, so the assertion reads the argv and env it would run with, without a re-exec.
+  type Spawn = Parameters<typeof reexecForProxy>[0];
+  const spawned: { cmd: string; argv: string[]; env: NodeJS.ProcessEnv }[] = [];
+  const exits: number[] = [];
+  const fakeSpawn: Spawn = (cmd, argv, opts) => {
+    spawned.push({ cmd, argv, env: opts.env });
+    return { status: 7 };
+  };
+  const prevProxy = process.env.NODE_USE_ENV_PROXY;
+  delete process.env.NODE_USE_ENV_PROXY;
+  reexecForProxy(fakeSpawn, (code) => exits.push(code));
+  expectEqual("re-exec runs this node again", spawned[0]?.cmd, process.execPath);
+  expectEqual("re-exec keeps argv[1:]", spawned[0]?.argv, process.argv.slice(1));
+  expectEqual("re-exec runs under NODE_USE_ENV_PROXY", spawned[0]?.env.NODE_USE_ENV_PROXY, "1");
+  expectEqual("re-exec exits with the child's status", exits, [7]);
+  spawned.length = 0;
+  exits.length = 0;
+  process.env.NODE_USE_ENV_PROXY = "1";
+  reexecForProxy(fakeSpawn, (code) => exits.push(code));
+  expect("already proxied: no re-exec", spawned.length === 0 && exits.length === 0);
+  if (prevProxy === undefined) delete process.env.NODE_USE_ENV_PROXY;
+  else process.env.NODE_USE_ENV_PROXY = prevProxy;
 
   let aborted = 0;
   const cancel = armSessionAbort(

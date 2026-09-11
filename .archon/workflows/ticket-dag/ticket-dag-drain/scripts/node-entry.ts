@@ -1,5 +1,5 @@
+import { spawnSync } from "node:child_process";
 import { loadConfig, type PackConfig } from "./config.ts";
-import { reexecForProxy } from "./proxy.ts";
 
 export type NodeEnv = {
   target: string;
@@ -22,6 +22,31 @@ function requireEnv(name: string): string {
   const value = process.env[name]?.trim();
   if (!value) throw new Error(`${name} is required`);
   return value;
+}
+
+/** NODE_USE_ENV_PROXY must be set at process start. Does not copy httpProxy from YAML. */
+export function proxyEnv(base: NodeJS.ProcessEnv = process.env): NodeJS.ProcessEnv {
+  return { ...base, NODE_USE_ENV_PROXY: "1" };
+}
+
+/** The one spawn reexecForProxy makes. A narrow type so a test can record the argv and env without a real re-exec. */
+type SpawnSync = (
+  cmd: string,
+  args: string[],
+  opts: { env: NodeJS.ProcessEnv; stdio: "inherit" },
+) => { status: number | null };
+
+/** Re-exec this node under proxyEnv() when the proxy is not already on, then exit with the child's status. */
+export function reexecForProxy(
+  spawn: SpawnSync = spawnSync,
+  exit: (code: number) => void = process.exit,
+): void {
+  if (process.env.NODE_USE_ENV_PROXY === "1") return;
+  const r = spawn(process.execPath, process.argv.slice(1), {
+    env: proxyEnv(),
+    stdio: "inherit",
+  });
+  exit(r.status ?? 1);
 }
 
 /**
