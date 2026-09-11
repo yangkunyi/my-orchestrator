@@ -85,7 +85,9 @@ function scanNodes(yaml: string): YamlNode[] {
     if (!node || indent <= nodeIndent) continue;
     const kv = /^([a-z_]+):\s*(.*)$/.exec(line.trim());
     if (!kv) continue;
-    const [, key, value] = kv as [string, string, string];
+    // The regex has two groups, so a match gives both: the same `!` the node-id match above uses.
+    const key = kv[1]!;
+    const value = kv[2]!;
     // Any key's value may read another node's output, the fan-out and loop keys included.
     for (const name of refs(value)) node.reads.push(name);
     if (block) {
