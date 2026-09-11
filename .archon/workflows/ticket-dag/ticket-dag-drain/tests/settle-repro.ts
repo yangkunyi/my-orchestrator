@@ -198,6 +198,10 @@ try {
     const result = await settleAfterAgent(root, ticket, wt);
     expectEqual("conflict settle result", result, "resolve");
     expectEqual("conflict Status", statusOf(root, rel), "CONFLICT");
+    // Ordering, not just outcome: Main was stamped CONFLICT *before* it was merged into the Worktree,
+    // so the Worktree's own copy of the Ticket reads that stamp. Integrating first would leave the
+    // Worktree reading MERGING - the order the settle sequence depends on (ADR-0042).
+    expectEqual("Worktree sees Main as of the CONFLICT stamp", statusOf(wt, rel), "CONFLICT");
     expect("Worktree kept on resolve", existsSync(wt), wt);
     expect("branch kept on resolve", branchExists(root, ticket.branch));
     expect("Main MERGE_HEAD aborted", !hasMergeHead(root));
