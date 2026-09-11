@@ -34,6 +34,8 @@ type YamlNode = {
   dependsOn: string[];
   fanOutAs?: string;
   fanOutJoin?: string;
+  /** True when the node declares a `when:` - a node that can be skipped is not a terminal state. */
+  hasWhen: boolean;
   /** Every `$<name>.output` this node's own keys read. */
   reads: string[];
 };
@@ -77,7 +79,7 @@ function scanNodes(yaml: string): YamlNode[] {
     const indent = line.length - line.trimStart().length;
     const head = /^- id:\s*(\S+)\s*$/.exec(line.trim());
     if (head) {
-      node = { id: head[1]!, withKeys: [], dependsOn: [], reads: [] };
+      node = { id: head[1]!, withKeys: [], dependsOn: [], reads: [], hasWhen: false };
       nodes.push(node);
       nodeIndent = indent;
       block = undefined;
@@ -89,6 +91,7 @@ function scanNodes(yaml: string): YamlNode[] {
     // The regex has two groups, so a match gives both: the same `!` the node-id match above uses.
     const key = kv[1]!;
     const value = kv[2]!;
+    if (key === "when" && value) node.hasWhen = true;
     // Any key's value may read another node's output, the fan-out and loop keys included.
     for (const name of refs(value)) node.reads.push(name);
     if (block) {
@@ -209,6 +212,22 @@ try {
         // is an archon_failed marker and the run still reports success, which is how a misconfigured
         // runner used to drain the backlog. Measured with a two-instance probe (ADR-0051).
         expectEqual(`${file}: ${node.id} fails the node when an instance fails`, node.fanOutJoin, "all_success");
+        // And the instance must BE terminal: archon reads "stopped without a terminal state" for an
+        // instance whose last node was skipped, which fails this node regardless of the join (measured).
+        // So the included workflow declares `returns:` naming a node that always runs; conflict is behind
+        // a `when:` and would leave a merged Ticket's instance non-terminal (ADR-0053).
+        if (existsSync(included)) {
+          const child = readFileSync(included, "utf8");
+          const returns = /^returns:\s*(\S+)/m.exec(child)?.[1];
+          expect(`${node.include} declares the node whose output is its terminal state`, returns !== undefined, child.slice(0, 200));
+          const named = scanNodes(child).find((n) => n.id === returns);
+          expect(`${node.include} returns a declared node`, named !== undefined, `${returns}`);
+          expect(
+            `${node.include} returns a node that always runs (no when:)`,
+            named !== undefined && !named.hasWhen,
+            `${returns}${named?.hasWhen ? " is behind a when:" : ""}`,
+          );
+        }
         if (existsSync(included) && node.fanOutAs) {
           const required = requiredInputs(readFileSync(included, "utf8"));
           expect(

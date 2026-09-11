@@ -3,6 +3,12 @@ description: |
   Per-Ticket implement then conflict if implement stdout is resolve.
   Not a public drain entry. Bare run is unsupported: ticket input is required.
 mutates_checkout: false
+# returns names the node that always runs and carries this Ticket's outcome token (merged / failed /
+# resolve). Without it the instance ends on `conflict`, which is skipped whenever implement did not
+# return resolve - and archon then reads the composed instance as "stopped without a terminal state",
+# which fails the drain's fan-out node and skips review and summary (measured with a real run: a merged
+# Ticket still failed the workflow). See ADR-0053.
+returns: implement
 inputs:
   ticket:
     required: true
