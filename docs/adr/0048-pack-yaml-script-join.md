@@ -1,0 +1,9 @@
+# The YAML and the scripts it names are joined by a test
+
+`yaml-contract-repro.ts` reads both workflow YAMLs as text and joins them to the scripts and the role table: a `script:` names a file in the folder that declares the node; the role a script runs is read from its source by script name across both pack folders (execute ships re-export shims, ADR-0037, so the body is in the drain) and the node id must equal it, with exactly one node per role and every role run by a node; every role node's `timeout` exceeds that role's `wallMs`, imported rather than re-spelled; a `with:` key is an `INPUTS_<KEY>` the node protocol actually reads, wired as `$INPUTS.<key>`; `inputs.config.default` equals `DEFAULT_CONFIG_REL`; `include:` names a workflow folder and `fan_out.as` an input that workflow requires; every `depends_on` name and every `$<node>.output` reference names a declared node.
+
+It also joins the two directions of "a node is a runnable script": every `import.meta.main` entry belongs to a declared node, and every declared script has an entry. The second direction is what a dead node entry looks like — `settle.ts` carried one until it stopped being a node — and it was found by a reviewer, not by a test, which is why it is pinned now.
+
+The file opens with a shape self-check so that a moved YAML shape fails the test instead of silently asserting nothing, and its mutations (a renamed script, a shrunk timeout, a dropped `depends_on`, an unwired `with:`, a second node on one role, a fifth role) each turn it red.
+
+Rejected: pinning the four roles only (the join covers every node); reading a node's role from the declaring folder alone (execute re-exports, so it cannot); leaving the relation to convention and comments (the point is that a rename fails a test rather than a workflow load).

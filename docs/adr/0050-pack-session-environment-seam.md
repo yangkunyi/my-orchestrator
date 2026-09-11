@@ -1,0 +1,11 @@
+# The session environment travels on the seam
+
+`PackAgentOpts.env` is required: a transform `(base: ProcessEnv) => ProcessEnv`, the environment that belongs with `cwd`, applied by each adapter to its own base — Pi's spawn hook and dsh's child env. `roles.ts` supplies it from the call's cwd through `sessionEnv`, which puts the Worktree's `.venv/bin` first and returns the base untouched when there is no `.venv/bin`, so the drain-end readers (whose cwd is the Target) are unaffected.
+
+Before this the fact was adapter-local: `prependVenvBin` had exactly one caller, the Pi bash tool, so `runner: dsh` ran a Worktree session without its `.venv` on PATH — contradicting the CONTEXT rule that a Ticket session's bash uses this Worktree's `.venv`. This is ADR-0040's rule (an option must not be one only a single adapter honours) applied to the environment.
+
+It is a transform rather than a resolved env so that Pi keeps its spawn context's other keys and dsh keeps its `DSH_*` variables. `prependVenvBin` is gone: one concept, one implementation, two callers.
+
+Known residual: the one call site `spawnHook: piSpawnHook(opts.env)` cannot be read back out of the tool definition the SDK builds, so replacing it with `(ctx) => ctx` is not caught by any test. Everything on either side of it — the seam value, the hook body, the composition — is asserted behaviourally.
+
+Rejected: each adapter composing PATH on its own (the drift this removes); a resolved env value on the seam (every adapter would have to merge its own base back in); the no-op guard living in the adapters rather than in the one function that owns the rule.
