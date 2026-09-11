@@ -26,13 +26,24 @@ try {
     // Premise: the branch is an ancestor of Main, and that alone must not count as MERGED.
     void gitC(root, "merge-base", "--is-ancestor", ticket.branch, "HEAD");
 
-    await rematchLeftovers(root);
+    const said: string[] = [];
+    const realError = console.error;
+    console.error = (...args: unknown[]) => {
+      said.push(args.map(String).join(" "));
+    };
+    try {
+      await rematchLeftovers(root);
+    } finally {
+      console.error = realError;
+    }
 
     const status = statusOf(root, rel);
     const worktreeKept = existsSync(wt);
     const branchKept = branchExists(root, ticket.branch);
-    const ok = status === "FAILED" && worktreeKept && branchKept;
-    console.log(JSON.stringify({ ok, status, worktreeKept, branchKept }));
+    // This FAILED goes through the one owner, so why it happened is recorded, not just stamped.
+    const why = said.find((line) => line.startsWith("feat/01 FAILED: ")) ?? "";
+    const ok = status === "FAILED" && worktreeKept && branchKept && why.includes("no merge commit");
+    console.log(JSON.stringify({ ok, status, worktreeKept, branchKept, why }));
     if (!ok) process.exitCode = 1;
   });
 } catch (e) {

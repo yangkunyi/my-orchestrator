@@ -1,5 +1,5 @@
 import { addAttempted } from "./attempted.ts";
-import { completeTicket, hasTicketMergeCommit, stamp, withMergeLock } from "./main-writes.ts";
+import { completeTicket, failTicket, hasTicketMergeCommit, withMergeLock } from "./main-writes.ts";
 import { runNode } from "./node-entry.ts";
 import { writeReviewBase } from "./review-artifacts.ts";
 import { leftoverInFlight, scanTickets } from "./tickets.ts";
@@ -11,7 +11,8 @@ export async function rematchLeftovers(target: string, artifactsDir?: string): P
       if (await hasTicketMergeCommit(target, ticket.branch)) {
         await completeTicket(target, ticket);
       } else {
-        await stamp(target, ticket, "FAILED");
+        // The one FAILED writer, so the reason is recorded too - this used to be a bare stamp.
+        await failTicket(target, ticket, "leftover in flight and Main has no merge commit of its branch");
         failedIds.push(ticket.id);
       }
     }
