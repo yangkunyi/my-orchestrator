@@ -3,7 +3,8 @@
  * Temp-Target repro: settle after agent - the empty-merge, dirty, conflict and merge routes, and the
  * one place a FAILED reason is recorded. No Pi, no Archon engine, no repo src/.
  */
-import { existsSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { spawnSync } from "node:child_process";
+import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { beginTicket, settleAfterAgent } from "../scripts/transitions.ts";
 import {
@@ -14,7 +15,8 @@ import {
   tryMerge,
   withMergeLock,
 } from "../scripts/main-writes.ts";
-import { ensureWorktreesIgnored } from "../scripts/worktree-env.ts";
+import { ensureVenvIgnored, ensureWorktreesIgnored } from "../scripts/worktree-env.ts";
+import { worktreeDirty } from "../scripts/git.ts";
 import {
   addTicketWorktree,
   branchExists,
@@ -33,6 +35,12 @@ import {
   withTarget,
   writeTicket,
 } from "./target.ts";
+
+/** The .gitignore line `git check-ignore -v` matched for `path`, or "" when the path is not ignored. */
+function ignoredBy(root: string, path: string): string {
+  const r = spawnSync("git", ["-C", root, "check-ignore", "-v", path], { encoding: "utf8" });
+  return r.status === 0 ? r.stdout.trim() : "";
+}
 
 try {
   await withTarget(async (root) => {
@@ -163,7 +171,7 @@ try {
       /ensureGitignoreLine writes Main and must run inside withMergeLock/,
     );
     await withMergeLock(root, () => ensureWorktreesIgnored(root));
-    expectEqual("ignore line landed under the caller's lock", readFileSync(join(root, ".gitignore"), "utf8"), "worktrees/\n");
+    expectEqual("ignore line landed under the caller's lock", readFileSync(join(root, ".gitignore"), "utf8"), "/worktrees/\n");
     expectEqual(
       "ignore line commit message",
       gitC(root, "log", "-1", "--format=%s"),
@@ -308,6 +316,56 @@ try {
     expect("both merge messages on Main 02", subjects(root).includes(`orchestrator: merge ${t2.branch}`));
     expect("one.txt on Main", existsSync(join(root, "one.txt")));
     expect("two.txt on Main", existsSync(join(root, "two.txt")));
+  });
+
+  // A fresh Target: the ignore lines are anchored, so they still cover the Target's own worktrees/
+  // and .venv/, and no longer reach a nested look-alike - which is where real sources live.
+  await withTarget(async (root) => {
+    writeTicket(root, "feat", "01", "demo", "READY", "None");
+    commitTickets(root);
+    await withMergeLock(root, () => ensureWorktreesIgnored(root));
+    await withMergeLock(root, () => ensureVenvIgnored(root));
+    expectEqual(
+      "fresh Target gets the anchored lines",
+      readFileSync(join(root, ".gitignore"), "utf8"),
+      "/worktrees/\n/.venv/\n",
+    );
+    expect("the Target's own worktrees/ is still ignored", ignoredBy(root, "worktrees/feat-01/x") !== "");
+    expect("the Target's own .venv/ is still ignored", ignoredBy(root, ".venv/bin/python") !== "");
+    expectEqual("a nested src/worktrees/x is not ignored", ignoredBy(root, "src/worktrees/x"), "");
+    expectEqual("a nested src/.venv/bin/python is not ignored", ignoredBy(root, "src/.venv/bin/python"), "");
+    const begun = await beginTicket(root, ticketOf(root, "feat/01"));
+    mkdirSync(join(begun.worktree, "src", "worktrees"), { recursive: true });
+    writeFileSync(join(begun.worktree, "src", "worktrees", "real.ts"), "// real source\n");
+    expect("a real src/worktrees/real.ts makes the Worktree dirty", await worktreeDirty(begun.worktree));
+  });
+
+  // A Target from an earlier drain already has the unanchored spelling. It is already satisfied: no
+  // rewrite of a committed line, no commit. That compat boundary costs the legacy Target the old
+  // ignore depth - a nested look-alike stays ignored there - which is the price of not churning a
+  // committed line drain after drain.
+  await withTarget(async (root) => {
+    writeTicket(root, "feat", "01", "demo", "READY", "None");
+    commitTickets(root);
+    writeFileSync(join(root, ".gitignore"), "worktrees/\n");
+    gitC(root, "add", ".gitignore");
+    gitC(root, "commit", "-m", "legacy ignore");
+    const head = gitC(root, "rev-parse", "HEAD");
+    await withMergeLock(root, () => ensureWorktreesIgnored(root));
+    expectEqual("a legacy Target is left as it was", readFileSync(join(root, ".gitignore"), "utf8"), "worktrees/\n");
+    expectEqual("a legacy Target gets no new commit", gitC(root, "rev-parse", "HEAD"), head);
+    expectEqual("and Main still ends at its own commit", gitC(root, "log", "-1", "--format=%s"), "legacy ignore");
+    // The Target's own worktrees/ is what the line was written for, and it is still ignored: the
+    // Target's dirty-tree reading is exactly what it was before this fix.
+    mkdirSync(join(root, "worktrees", "feat-01"), { recursive: true });
+    writeFileSync(join(root, "worktrees", "feat-01", "scratch"), "x\n");
+    expect("the legacy Target's own worktrees/ is still ignored", ignoredBy(root, "worktrees/feat-01/scratch") !== "");
+    expect("and the legacy Target keeps the old ignore depth", ignoredBy(root, "src/worktrees/x") !== "");
+    expectEqual("so the Target still reads clean", gitC(root, "status", "--porcelain"), "");
+    // The .venv line had no legacy spelling here, so it lands anchored, on Main, under its message.
+    await withMergeLock(root, () => ensureVenvIgnored(root));
+    expectEqual("the .venv line lands anchored", readFileSync(join(root, ".gitignore"), "utf8"), "worktrees/\n/.venv/\n");
+    expectEqual("with its own commit", gitC(root, "log", "-1", "--format=%s"), "chore(orchestrator): ignore .venv/");
   });
 
   console.log(JSON.stringify({ ok: true }));

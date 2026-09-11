@@ -46,11 +46,19 @@ export async function syncWorktreeEnv(worktree: string): Promise<void> {
   }
 }
 
-/** Writes Main, so it stays inside the caller's transaction: beginTicket holds it. */
+/**
+ * The two ignore lines are anchored (`/name/`), and that is not cosmetic: git matches an unanchored
+ * `worktrees/` at any depth, so a Target holding real sources under `src/worktrees/` would have them
+ * ignored, and `worktreeDirty` reads git status - a Worktree with such a file would read clean. The
+ * aliases are the unanchored spellings an earlier drain may already have committed: satisfied means
+ * no write, so a Target is not rewritten and churned on every drain.
+ *
+ * Both write Main, so they stay inside the caller's transaction: beginTicket holds it.
+ */
 export async function ensureWorktreesIgnored(target: string): Promise<void> {
-  await ensureGitignoreLine(target, "worktrees/", ["worktrees", "/worktrees/"], "chore(orchestrator): ignore worktrees/");
+  await ensureGitignoreLine(target, "/worktrees/", ["worktrees", "worktrees/"], "chore(orchestrator): ignore worktrees/");
 }
 
 export async function ensureVenvIgnored(target: string): Promise<void> {
-  await ensureGitignoreLine(target, ".venv/", [".venv", "/.venv/"], "chore(orchestrator): ignore .venv/");
+  await ensureGitignoreLine(target, "/.venv/", [".venv", ".venv/"], "chore(orchestrator): ignore .venv/");
 }
