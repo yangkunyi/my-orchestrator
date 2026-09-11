@@ -4,14 +4,14 @@
  * allowlist, the bash need and the wall clock - and the node id, script filename and session filename
  * spell the same four role names.
  */
-import { existsSync, readFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import { AGENT_WALL_MS, type AgentRole } from "../scripts/agent.ts";
 import type { PackConfig } from "../scripts/config.ts";
 import { personaFor, readTddSkill, REVIEW_AXES, reviewPersona, summaryPersona } from "../scripts/prompt.ts";
 import { REVIEW_WALL_MS, ROLES, roleAgent } from "../scripts/roles.ts";
 import { roleSessionFile } from "../scripts/session-log.ts";
-import { expect, expectEqual } from "./target.ts";
+import { expect, expectEqual, mkTemp } from "./target.ts";
 
 // The table builds strings and opts; its only filesystem touch is the tdd tree an implement node runs under.
 const ARTIFACTS = "/artifacts";
@@ -48,6 +48,7 @@ try {
   expectEqual("the role table's opts are the seam's whole vocabulary", Object.keys(impl).sort(), [
     "artifactsDir",
     "cwd",
+    "env",
     "model",
     "persona",
     "prompt",
@@ -57,6 +58,28 @@ try {
     "thinkingLevel",
     "wallMs",
   ]);
+  // The environment that goes with the cwd travels on the seam, built from the cwd of the call.
+  const worktree = mkTemp("pack-roles-wt-");
+  try {
+    mkdirSync(join(worktree, ".venv", "bin"), { recursive: true });
+    const inWorktree = roleAgent({
+      role: "implement",
+      args: { ticketId: "feat/01" },
+      cwd: worktree,
+      artifactsDir: ARTIFACTS,
+      config: CONFIG,
+      prompt: TASK,
+    });
+    const base: NodeJS.ProcessEnv = { PATH: "/usr/bin" };
+    expectEqual(
+      "the table's env leads with that cwd's .venv",
+      inWorktree.env(base).PATH,
+      `${join(worktree, ".venv", "bin")}:/usr/bin`,
+    );
+    expectEqual("a cwd without a .venv is passed through", impl.env(base), base);
+  } finally {
+    rmSync(worktree, { recursive: true, force: true });
+  }
   expectEqual("implement wall clock is the ticket clock", impl.wallMs, AGENT_WALL_MS);
   expectEqual("implement persona is the skill", impl.persona, personaFor("implement", "pi", { skill: undefined }));
 

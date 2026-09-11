@@ -120,6 +120,7 @@ try {
       [
         "artifactsDir",
         "cwd",
+        "env",
         "model",
         "persona",
         "prompt",

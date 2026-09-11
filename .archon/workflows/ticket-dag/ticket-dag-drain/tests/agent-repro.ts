@@ -4,10 +4,11 @@ import { mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { AGENT_WALL_MS, armSessionAbort, noopAgent, packAnswer } from "../scripts/agent.ts";
 import { composeMessage, conflictTask, implementTask, personaFor, REVIEW_AXES, reviewPersona, reviewTask } from "../scripts/prompt.ts";
-import { PI_READ_ONLY_TOOLS, piTools, piTurn } from "../scripts/pi-session.ts";
+import { PI_READ_ONLY_TOOLS, piSpawnHook, piTools, piTurn } from "../scripts/pi-session.ts";
 import { proxyEnv } from "../scripts/proxy.ts";
 import { readPiSession, roleSessionFile } from "../scripts/session-log.ts";
 import { REVIEW_WALL_MS } from "../scripts/roles.ts";
+import { sessionEnv, sessionSpawnEnv } from "../scripts/worktree-env.ts";
 import { expect, expectEqual, mkTemp, sleep } from "./target.ts";
 
 const executeYaml = join(import.meta.dir, "../../ticket-dag-execute/ticket-dag-execute.yaml");
@@ -131,6 +132,7 @@ try {
 
     const noop = await noopAgent({
       cwd: artifacts,
+      env: (base) => base,
       artifactsDir: artifacts,
       sessionKey: "feat/01",
       role: "implement",
@@ -144,6 +146,49 @@ try {
     expectEqual("noop has no lastError", noop.lastError, undefined);
   } finally {
     rmSync(artifacts, { recursive: true, force: true });
+  }
+
+  // The seam's environment transform: the Worktree rule travels on the opts, so it is one value both
+  // adapters apply - Pi to its spawn context, dsh to its child environment (behaviourally asserted in
+  // dsh-agent-repro.ts). Here: the transform is the composition Pi used to do inline, byte for byte.
+  const worktree = mkTemp("pack-seam-wt-");
+  try {
+    mkdirSync(join(worktree, ".venv", "bin"), { recursive: true });
+    const base: NodeJS.ProcessEnv = { PATH: "/usr/bin", HOME: "/home/op" };
+    const composed = sessionEnv(worktree, base);
+    expectEqual(
+      "the Worktree's .venv leads the composed PATH",
+      composed.PATH,
+      `${join(worktree, ".venv", "bin")}:/usr/bin`,
+    );
+    expectEqual("the rest of the spawn environment survives", composed.HOME, "/home/op");
+    const noVenv = sessionEnv(join(worktree, "no-venv-here"), base);
+    expect("a cwd with no .venv hands the base back as it was", noVenv === base && noVenv.PATH === base.PATH);
+
+    // What Pi hands bash, without a session: piSpawnHook is the value the adapter passes to the SDK, so
+    // the test drives that value. The SDK captures a spawnHook inside the tool definition, where nothing
+    // can reach it, and Pi's execute needs a whole ExtensionContext. dsh's half is behavioural in
+    // dsh-agent-repro.ts, through its stub's recorded child environment.
+    const ctx = { command: "uv run pytest", cwd: worktree, env: base };
+    const spawned = piSpawnHook((b) => sessionEnv(worktree, b))(ctx);
+    expectEqual(
+      "the spawn context keeps its command and cwd",
+      [spawned.command, spawned.cwd],
+      ["uv run pytest", worktree],
+    );
+    expectEqual(
+      "and hands bash the Worktree's .venv first",
+      spawned.env.PATH,
+      `${join(worktree, ".venv", "bin")}:/usr/bin`,
+    );
+    const reader = sessionSpawnEnv((b) => sessionEnv("/target", b), {
+      command: "git log",
+      cwd: "/target",
+      env: base,
+    });
+    expectEqual("a Main reader's spawn env is its own base", reader.env, base);
+  } finally {
+    rmSync(worktree, { recursive: true, force: true });
   }
 
   expectEqual("2 hour wall clock", AGENT_WALL_MS, 2 * 60 * 60 * 1000);

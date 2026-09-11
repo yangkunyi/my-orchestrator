@@ -1,6 +1,7 @@
 import { AGENT_WALL_MS, type AgentRole, type PackAgentOpts } from "./agent.ts";
 import type { PackConfig, Runner } from "./config.ts";
 import { personaFor, readTddSkill } from "./prompt.ts";
+import { sessionEnv } from "./worktree-env.ts";
 
 /** The drain-end readers share one clock: review and summary read the same range and report on it. */
 export const REVIEW_WALL_MS = 30 * 60 * 1000;
@@ -78,6 +79,8 @@ export function roleAgent<R extends AgentRole>(call: RoleCall<R>): PackAgentOpts
     cwd: call.cwd,
     artifactsDir: call.artifactsDir,
     sessionKey,
+    // The Worktree rule travels with the cwd it belongs to, not with an adapter's memory of it.
+    env: (base) => sessionEnv(call.cwd, base),
     role: call.role,
     model: call.config.model,
     thinkingLevel: call.config.thinkingLevel,

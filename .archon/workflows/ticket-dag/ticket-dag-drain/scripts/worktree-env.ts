@@ -8,10 +8,32 @@ const execFile = promisify(execFileCb);
 
 /** The Ticket Worktree's environment: its own .venv on PATH, its uv sync, its ignore lines on Main. */
 
-export function prependVenvBin(path: string | undefined, worktree: string): string {
-  const bin = join(worktree, ".venv", "bin");
-  if (!existsSync(bin)) return path ?? "";
-  return `${bin}${delimiter}${path ?? ""}`;
+/**
+ * The environment one session under this cwd runs under: this Worktree's `.venv/bin` first, then the
+ * base the adapter brought (Pi's spawn context, dsh's child environment). The seam carries this as a
+ * transform rather than a resolved environment, so an adapter keeps whatever else its own base needs.
+ *
+ * A cwd with no `.venv/bin` - the Target, where the drain-end readers run - returns the base untouched.
+ * That is what makes it safe for every role to apply, and impossible for one runner to honour the
+ * Worktree rule while another quietly drops it.
+ */
+export function sessionEnv(cwd: string, base: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
+  const bin = join(cwd, ".venv", "bin");
+  if (!existsSync(bin)) return base;
+  return { ...base, PATH: `${bin}${delimiter}${base.PATH ?? ""}` };
+}
+
+/**
+ * One bash call's spawn context with the seam's environment applied: the shape Pi's spawnHook takes and
+ * returns, minus any Pi type, so what Pi hands bash is assertable without a session - the SDK captures
+ * the hook inside the tool definition, where nothing can reach it. A cwd with no `.venv` leaves the
+ * context's own environment as it was.
+ */
+export function sessionSpawnEnv(
+  seamEnv: (base: NodeJS.ProcessEnv) => NodeJS.ProcessEnv,
+  ctx: { command: string; cwd: string; env: NodeJS.ProcessEnv },
+): { command: string; cwd: string; env: NodeJS.ProcessEnv } {
+  return { ...ctx, env: seamEnv(ctx.env) };
 }
 
 export async function syncWorktreeEnv(worktree: string): Promise<void> {

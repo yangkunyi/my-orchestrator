@@ -8,6 +8,13 @@ export const AGENT_WALL_MS = 2 * 60 * 60 * 1000;
 
 export type PackAgentOpts = {
   cwd: string;
+  /**
+   * The environment the session's shell runs under, applied by the adapter to the base it already has:
+   * Pi's spawn context, dsh's child environment. Whichever runner a Target selects, a session under a
+   * Worktree runs with that Worktree's `.venv` on PATH (worktree-env.ts). Required, because the runners
+   * differ in how they compose an environment, not in whether the Worktree rule applies to them.
+   */
+  env: (base: NodeJS.ProcessEnv) => NodeJS.ProcessEnv;
   artifactsDir: string;
   /**
    * The key this role's session lives under: a Ticket id for the ticket nodes, the node's own name

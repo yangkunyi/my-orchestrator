@@ -10,7 +10,7 @@ import {
 } from "./agent.ts";
 import { readPiSession, roleSessionFile } from "./session-log.ts";
 import { composeMessage } from "./prompt.ts";
-import { prependVenvBin } from "./worktree-env.ts";
+import { sessionSpawnEnv } from "./worktree-env.ts";
 
 /**
  * Pi enforces a role's read-only contract structurally - these are the only tools mounted - and the
@@ -22,6 +22,19 @@ export const PI_READ_ONLY_TOOLS = ["read", "grep", "find", "ls", "bash"];
 /** The tools Pi mounts for a role: the read-only allowlist for the drain-end readers, else its default. */
 export function piTools(role: AgentRole): string[] | undefined {
   return role === "review" || role === "summary" ? PI_READ_ONLY_TOOLS : undefined;
+}
+
+/** The spawn context Pi's bash tool hands a hook, written out so this module needs no SDK type. */
+type SpawnContext = { command: string; cwd: string; env: NodeJS.ProcessEnv };
+
+/**
+ * The spawn hook Pi's bash tool is created with: the seam's environment (a Worktree's `.venv` first on
+ * PATH) applied to the context the SDK hands it. Exported, like piTools and piTurn, because the SDK
+ * captures a spawnHook inside the tool definition where no repro can reach it - this returned value is
+ * what actually reaches bash, so a repro can drive it with no session and no credentials.
+ */
+export function piSpawnHook(env: PackAgentOpts["env"]): (ctx: SpawnContext) => SpawnContext {
+  return (ctx) => sessionSpawnEnv(env, ctx);
 }
 
 /**
@@ -88,10 +101,7 @@ export async function runPackPi(opts: PackAgentOpts): Promise<PackAgentResult> {
     customTools: [
       defineTool(
         createBashToolDefinition(opts.cwd, {
-          spawnHook: (ctx) => ({
-            ...ctx,
-            env: { ...ctx.env, PATH: prependVenvBin(ctx.env.PATH, opts.cwd) },
-          }),
+          spawnHook: piSpawnHook(opts.env),
         }),
       ),
     ],

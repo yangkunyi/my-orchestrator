@@ -78,13 +78,15 @@ export async function dshAgent(opts: PackAgentOpts): Promise<PackAgentResult> {
   const dshHome = process.env.DSH_HOME?.trim() || DEFAULT_DSH_HOME;
   const rt = new DshRuntime({
     cwd: opts.cwd,
-    env: {
+    // The same seam transform Pi applies, on this adapter's own base: DSH_* stay, the Worktree's
+    // .venv joins PATH when there is one. dsh's session is the one that used to miss it.
+    env: opts.env({
       ...process.env,
       DSH_HOME: dshHome,
       DEEPSEEK_BASE_URL: creds.baseUrl,
       DEEPSEEK_API_KEY: creds.apiKey,
       DSH_SYSTEM_PROMPT: persona,
-    },
+    }),
     argv: ["--profile", PROFILE],
     provider: PROVIDER,
     model: opts.model?.trim() || creds.model || DEFAULT_MODEL,

@@ -10,6 +10,7 @@ import type { PackAgentOpts } from "../scripts/agent.ts";
 import { dshAgent } from "../scripts/dsh-agent.ts";
 import { DshRuntime } from "../scripts/dsh-runtime.ts";
 import { implementTask, personaFor, readTddSkill, REVIEW_AXES, reviewPersona, reviewTask } from "../scripts/prompt.ts";
+import { sessionEnv } from "../scripts/worktree-env.ts";
 import { expect, expectEqual, expectReject, mkTemp, runScript } from "./target.ts";
 
 const STUB = `#!${process.execPath}
@@ -23,6 +24,7 @@ const record = {
   baseUrl: process.env.DEEPSEEK_BASE_URL,
   apiKey: process.env.DEEPSEEK_API_KEY,
   persona: process.env.DSH_SYSTEM_PROMPT,
+  path: process.env.PATH,
 };
 const save = () => writeFileSync(seen, JSON.stringify(record));
 const reply = (id, result) => process.stdout.write(JSON.stringify({ jsonrpc: "2.0", id, result }) + "\\n");
@@ -101,10 +103,15 @@ type Call = {
   persona: string;
   model?: string;
   level?: ThinkingLevel;
+  /** Where the session runs: the Ticket Worktree by default, the Target for the Main cases below. */
+  cwd?: string;
 };
-const run = ({ role, task, persona, model, level = "high" }: Call) =>
+const run = ({ role, task, persona, model, level = "high", cwd = work }: Call) =>
   dshAgent({
-    cwd: work,
+    cwd,
+    // The seam's transform from the module that owns it: the same value roles.ts puts on the opts, and
+    // the one Pi applies to its spawn context. This test is about what dsh does with what it is handed.
+    env: (base) => sessionEnv(cwd, base),
     artifactsDir: work,
     sessionKey: "feat/01",
     role,
@@ -122,6 +129,8 @@ try {
     body: "---\nname: tdd\ndescription: stub\n---\n\nRed before green.\n\nTest only at pre-agreed seams.\n\nRead the codebase-design skill for the vocabulary.\n",
   };
   const task = implementTask("tickets/01-demo.md");
+  // A Ticket Worktree has a .venv once `uv sync` has run; the stub records the PATH it was spawned with.
+  mkdirSync(join(work, ".venv", "bin"), { recursive: true });
   const result = await run({ role: "implement", task, persona: personaFor("implement", "dsh", { skill }) });
   const got = JSON.parse(readFileSync(seen, "utf8")) as Record<string, any>;
 
@@ -156,6 +165,19 @@ try {
   expectEqual("the answer comes off the event stream", result.answer, { kind: "text", text: "STUB-ANSWER" });
   const answerText = result.answer.kind === "text" ? result.answer.text : "";
   expect("reasoning parts never leak into the answer", !answerText.includes("THINKING-LEAK"));
+
+  // The Worktree rule, where it used to be dropped: dsh's child used to get `...process.env` alone.
+  expectEqual(
+    "the Worktree's .venv is first on the child PATH",
+    got.path,
+    `${join(work, ".venv", "bin")}:${saved.PATH ?? ""}`,
+  );
+  // The Target has no .venv, so the drain-end readers' base environment is passed through untouched.
+  const target = mkTemp("pack-dsh-main-");
+  await run({ role: "conflict", task: "resolve the conflict", persona: personaFor("conflict", "dsh"), cwd: target });
+  const gotMain = JSON.parse(readFileSync(seen, "utf8")) as Record<string, any>;
+  expectEqual("a cwd without a .venv leaves PATH alone", gotMain.path, saved.PATH ?? "");
+  expectEqual("and still gets the harness variables", gotMain.home, home);
 
   process.env.STUB_TURN_KIND = "aborted";
   const second = await run({
