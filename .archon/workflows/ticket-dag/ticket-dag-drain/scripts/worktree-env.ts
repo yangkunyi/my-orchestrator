@@ -25,9 +25,10 @@ export function sessionEnv(cwd: string, base: NodeJS.ProcessEnv): NodeJS.Process
 
 /**
  * One bash call's spawn context with the seam's environment applied: the shape Pi's spawnHook takes and
- * returns, minus any Pi type, so what Pi hands bash is assertable without a session - the SDK captures
- * the hook inside the tool definition, where nothing can reach it. A cwd with no `.venv` leaves the
- * context's own environment as it was.
+ * returns, minus any Pi type. Assertable without a session, and the mount itself is pinned too: the
+ * session builds its tool through `piBashTool`, whose definition a repro drives (pi-sdk-repro.ts), so
+ * the environment Pi hands bash is read off a real spawn. A cwd with no `.venv` leaves the context's own
+ * environment as it was.
  */
 export function sessionSpawnEnv(
   seamEnv: (base: NodeJS.ProcessEnv) => NodeJS.ProcessEnv,

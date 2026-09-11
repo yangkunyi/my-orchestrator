@@ -1,0 +1,9 @@
+# A module's vocabulary stays private unless someone reads it
+
+The pack had 147 exported names and 25 of them had no reader in any other file. Some were genuinely dead (`implement.ts` re-exported `TicketAgentOpts` that nothing imported), some were the module's own vocabulary leaking out (`isInFlight`/`isMerged` in `tickets.ts`, used by `leftoverInFlight`/`blockersMerged` two lines below), and the four `run*Cli` entry functions were public although their only caller is the `if (import.meta.main)` block in the same file that a YAML `script:` runs as a process.
+
+The rule now: a name is exported when another file reads it, and otherwise it is private — including the entry functions, because running a file as a process does not need an export, only an import.meta.main block. 22 names went private and the unread re-export was deleted; the surface is 122 names with no unreaders. `isInFlight`/`isMerged` were kept — as the private vocabulary of `tickets.ts`, not as exports: deleting them would inline the classification they name.
+
+Deliberate exceptions are the readers' names, not a category: `parseConfigText`, `piSdkCandidates`, `loadPiSdk` and `piBashTool` stay exported because a repro drives them (a filesystem-free reader, the ladder with an injected machine, the unreachable path, the mounted tool), and each says so in its doc comment. Older test-only readers (`piTurn`, `piTools`, `piSpawnHook`, `proxyEnv`, `parseStatus`, `isLockHeld`, `noopAgent`) were left for a later pass; the rule names them now.
+
+Rejected: exporting for a hypothetical caller (the pack has none outside itself); a lint or runtime check for unread exports (the typecheck plus the 15 repros caught the one mutation that mattered — making a live export private is `TS2459`); deleting `isInFlight`/`isMerged` outright (they are the code's vocabulary even when nobody outside reads them).

@@ -4,7 +4,7 @@
  * really spawns with. No Archon engine, no session, no credentials, no network.
  */
 import { spawnSync } from "node:child_process";
-import { cpSync, existsSync, mkdirSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import { cpSync, existsSync, mkdirSync, readFileSync, realpathSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { RunnerUnavailable } from "../scripts/agent.ts";
@@ -42,6 +42,39 @@ function packageDirOf(file: string): string {
     if (existsSync(join(dir, "package.json"))) return dir;
     if (dirname(dir) === dir) throw new Error(`no package.json above ${file}`);
   }
+}
+
+/** Bun's `which`, read off globalThis: tsc checks this file without bun's types (as pi-session.ts does). */
+const bunGlobal = globalThis as { Bun?: { which?: (command: string) => string | null } };
+
+/**
+ * An installed Pi SDK for this repro to point its fake CLI at. The dev checkout resolves it by name; a
+ * deployed copy of the pack - no node_modules above it, which is its normal home - derives it from the
+ * `pi` CLI on PATH, the way the adapter itself does; `PI_SDK_PATH` is the operator's word. Failing
+ * loudly is deliberate: a repro that skipped when it found no install would be the hole it exists to close.
+ */
+function installedSdkDir(): string {
+  try {
+    return packageDirOf(fileURLToPath(import.meta.resolve(PI_SDK_PACKAGE)));
+  } catch {
+    // No node_modules above this file: the deployed copy, which is normal and not a failure.
+  }
+  const cli = bunGlobal.Bun?.which?.("pi") ?? null;
+  if (cli) {
+    for (let dir = dirname(realpathSync(cli)); ; dir = dirname(dir)) {
+      const candidate = join(dir, "node_modules", "@earendil-works", "pi-coding-agent");
+      if (existsSync(join(candidate, "package.json"))) return candidate;
+      if (dirname(dir) === dir) break;
+    }
+  }
+  const fromEnv = process.env.PI_SDK_PATH?.trim();
+  if (fromEnv) {
+    const asDir = join(fromEnv, "package.json");
+    return packageDirOf(existsSync(asDir) ? asDir : fromEnv);
+  }
+  throw new Error(
+    `cannot find an installed ${PI_SDK_PACKAGE} to use as a fixture: run from a checkout, put \`pi\` on PATH, or set PI_SDK_PATH`,
+  );
 }
 
 /** One package's `bin` entry: a bare string, or the name-to-path map this package publishes. */
@@ -147,7 +180,7 @@ try {
   // reach the SDK another way: the `pi` CLI's own install tree. The CLI pointed at here is the repo's
   // own install, symlinked the way a global install is (`pi` -> .../node_modules/.../dist/bundle/cli.js),
   // so this case does not depend on where the machine happened to install Pi.
-  const sdkDir = packageDirOf(fileURLToPath(import.meta.resolve(PI_SDK_PACKAGE)));
+  const sdkDir = installedSdkDir();
   const sdkManifest = JSON.parse(readFileSync(join(sdkDir, "package.json"), "utf8")) as { bin?: string | Record<string, string> };
   const cli = join(sdkDir, binOf(sdkManifest));
   mkdirSync(join(root, "bin"), { recursive: true });
