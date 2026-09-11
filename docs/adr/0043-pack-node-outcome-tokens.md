@@ -1,0 +1,7 @@
+# The tokens the workflows compare live in one module, and a test reads the YAMLs
+
+`node-outcomes.ts` owns the vocabulary that crosses the workflow boundary: `RESOLVE` (`"resolve"`, the token implement returns and execute gates on), `EMPTY_PICK` (`"[]"`), the `BeginOutcome` and `SettleResult` types built from them, and `nodeLine(token)` for the trailing newline a node's stdout uses. `begin`, `pick`, `implement`, `conflict`, `settle` and `node-entry` import the token instead of declaring a private union or spelling the literal; the two YAMLs still compare strings, because that is what a workflow does.
+
+The join between the two is a test, not a convention: `tests/node-outcomes-repro.ts` reads both YAML files and asserts that their comparison literals (`until_bash: test $pick.output = "[]"`, `when: "$implement.output == 'resolve'"`) match the module's exports, so renaming a token fails a test rather than a workflow run. Archon strips exactly one trailing newline from a node's output before the comparison sees it (measured), which is why `nodeLine` appends one and `pick.ts`'s bare `JSON.stringify` is equally correct.
+
+Rejected: string literals at both ends (a rename loads fine and fails in the middle of a drain); duplicating the tokens in YAML comments (comments do not run); JSON-encoding the tokens (the workflow compares text, and `[]` is what `pick` produces); promoting the concurrency bound to a YAML concept (the real bound is `concurrency` in `pick.ts`; `fan_out` over the picked ids is only how a batch is spread).
