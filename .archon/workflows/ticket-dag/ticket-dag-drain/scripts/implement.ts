@@ -1,4 +1,4 @@
-import { defaultAgent, type AgentRunner, type TicketAgentOpts } from "./agent.ts";
+import { defaultAgent, RunnerUnavailable, type AgentRunner, type TicketAgentOpts } from "./agent.ts";
 import { beginTicket } from "./begin.ts";
 import { loadConfig, type PackConfig } from "./config.ts";
 import { failTicket, withMergeLock } from "./main-writes.ts";
@@ -37,6 +37,14 @@ export async function implementTicket(
     console.error(`${ticket.id} session ${turn.sessionFile}`);
     return settleAfterAgent(target, ticket, begun.worktree, turn.lastError);
   } catch (e) {
+    // The runner never started, so this Ticket's work did not fail - a Ticket no agent saw must not be
+    // recorded as one whose work did. The attempt is over, so the reason goes on the Ticket where
+    // every other reason goes, and the error is rethrown: the node exits non-zero and Archon stops the
+    // drain here instead of marking the whole startable backlog FAILED (node-entry.ts).
+    if (e instanceof RunnerUnavailable) {
+      await withMergeLock(target, () => failTicket(target, ticket, e.message));
+      throw e;
+    }
     // The turn threw where a returned outcome is expected: one FAILED stamp, its own transaction.
     await withMergeLock(target, () =>
       failTicket(target, ticket, e instanceof Error ? e.message : String(e)),

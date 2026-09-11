@@ -4,6 +4,7 @@ import {
   AGENT_WALL_MS,
   armSessionAbort,
   packAnswer,
+  RunnerUnavailable,
   type AgentRole,
   type PackAgentOpts,
   type PackAgentResult,
@@ -48,6 +49,37 @@ export function piTurn(sessionFile: string, lastError: string | undefined): Pack
 }
 
 export async function runPackPi(opts: PackAgentOpts): Promise<PackAgentResult> {
+  const pi = await startPiSession(opts).catch((e: unknown) => {
+    // Everything before the first turn is "cannot start": the SDK, the session file, the model, the
+    // tools. The caller has to hear it as such, or it blames the Ticket for a runner nobody configured.
+    throw new RunnerUnavailable(
+      `the pi runner could not start: ${e instanceof Error ? e.message : String(e)}`,
+    );
+  });
+  try {
+    try {
+      await pi.session.prompt(composeMessage(opts.persona, opts.prompt));
+    } catch (e) {
+      const file = pi.sessionManager.getSessionFile() ?? pi.sessionFile;
+      const msg = e instanceof Error ? e.message : String(e);
+      return piTurn(file, pi.aborted() ? "agent aborted after wall clock" : msg);
+    }
+    return piTurn(
+      pi.sessionManager.getSessionFile() ?? pi.sessionFile,
+      pi.aborted() ? "agent aborted after wall clock" : undefined,
+    );
+  } finally {
+    pi.cancel();
+    pi.session.dispose();
+  }
+}
+
+/**
+ * Everything the Pi runner needs before a turn runs: the SDK, the session file, the model, the mounted
+ * tools, the wall clock. One function because a throw anywhere in here means the same thing to a
+ * Ticket - the runner could not start (RunnerUnavailable, agent.ts) - and nothing here is a turn.
+ */
+async function startPiSession(opts: PackAgentOpts) {
   const {
     createAgentSession,
     createBashToolDefinition,
@@ -117,20 +149,5 @@ export async function runPackPi(opts: PackAgentOpts): Promise<PackAgentResult> {
     },
     opts.wallMs ?? AGENT_WALL_MS,
   );
-  try {
-    try {
-      await session.prompt(composeMessage(opts.persona, opts.prompt));
-    } catch (e) {
-      const file = sessionManager.getSessionFile() ?? sessionFile;
-      const msg = e instanceof Error ? e.message : String(e);
-      return piTurn(file, aborted ? "agent aborted after wall clock" : msg);
-    }
-    return piTurn(
-      sessionManager.getSessionFile() ?? sessionFile,
-      aborted ? "agent aborted after wall clock" : undefined,
-    );
-  } finally {
-    cancel();
-    session.dispose();
-  }
+  return { session, sessionManager, sessionFile, cancel, aborted: () => aborted };
 }

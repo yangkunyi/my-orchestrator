@@ -1,6 +1,6 @@
 import { existsSync } from "node:fs";
 import { join } from "node:path";
-import { defaultAgent, type AgentRunner, type TicketAgentOpts } from "./agent.ts";
+import { defaultAgent, RunnerUnavailable, type AgentRunner, type TicketAgentOpts } from "./agent.ts";
 import { conflictTask } from "./prompt.ts";
 import { roleAgent } from "./roles.ts";
 import { syncWorktreeEnv } from "./worktree-env.ts";
@@ -52,6 +52,13 @@ export async function conflictTicket(
     console.error(`${ticket.id} session ${turn.sessionFile}`);
     return settleAfterConflict(target, ticket, worktree, turn.lastError);
   } catch (e) {
+    // Same as the implement node: a runner that never started is not this Ticket's failure. The reason
+    // is recorded on the Ticket here, and the error leaves so the node exits non-zero and the drain
+    // stops (node-entry.ts: a Git-contract outcome exits 0, a throw does not).
+    if (e instanceof RunnerUnavailable) {
+      await withMergeLock(target, () => failTicket(target, ticket, e.message));
+      throw e;
+    }
     // The conflict turn threw where an outcome is expected: one FAILED stamp, its own transaction.
     await withMergeLock(target, () =>
       failTicket(target, ticket, e instanceof Error ? e.message : String(e)),

@@ -19,7 +19,7 @@
 import { existsSync, readFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
-import { AGENT_WALL_MS, packAnswer, type PackAgentOpts, type PackAgentResult } from "./agent.ts";
+import { AGENT_WALL_MS, packAnswer, RunnerUnavailable, type PackAgentOpts, type PackAgentResult } from "./agent.ts";
 import { DshRuntime } from "./dsh-runtime.ts";
 import type { ThinkingLevel } from "./config.ts";
 
@@ -58,7 +58,7 @@ function credentials(): Credentials {
   if (typeof p?.baseUrl === "string" && typeof p.apiKey === "string") {
     return { baseUrl: p.baseUrl, apiKey: p.apiKey, model: models[0] };
   }
-  throw new Error(
+  throw new RunnerUnavailable(
     "the dsh runner needs DEEPSEEK_BASE_URL + DEEPSEEK_API_KEY, or a providers.packy entry in ~/.pi/agent/models.json",
   );
 }
@@ -73,7 +73,11 @@ function dshSessionFile(dshHome: string, cwd: string, sessionId: string): string
 
 export async function dshAgent(opts: PackAgentOpts): Promise<PackAgentResult> {
   const persona = opts.persona;
-  if (!persona) throw new Error("the dsh runner needs opts.persona: the skill or contract for its system prompt");
+  if (!persona) {
+    throw new RunnerUnavailable(
+      "the dsh runner needs opts.persona: the skill or contract for its system prompt",
+    );
+  }
   const creds = credentials();
   const dshHome = process.env.DSH_HOME?.trim() || DEFAULT_DSH_HOME;
   const rt = new DshRuntime({
@@ -115,10 +119,17 @@ export async function dshAgent(opts: PackAgentOpts): Promise<PackAgentResult> {
     };
   } catch (e) {
     const msg = e instanceof Error ? e.message : String(e);
+    if (aborted) {
+      return { sessionFile: sessionFile(), answer: packAnswer(rt.lastMessage()), lastError: "agent aborted after wall clock" };
+    }
+    // A failure before the handshake is not a turn: the harness never came up (no `dsh` on PATH, a
+    // profile that cannot boot, a child that exits early). The caller has to hear that as a runner
+    // that could not start, or it blames the Ticket for a runner nobody configured.
+    if (!rt.hasStarted()) throw new RunnerUnavailable(`the dsh runner could not start: ${msg}`);
     return {
       sessionFile: sessionFile(),
       answer: packAnswer(rt.lastMessage()),
-      lastError: aborted ? "agent aborted after wall clock" : msg,
+      lastError: msg,
     };
   } finally {
     clearTimeout(wall);

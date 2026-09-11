@@ -2,7 +2,7 @@
 /** Temp-Target repro: pack Pi SDK wiring without a live session. No Archon engine, no repo src/. */
 import { mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { AGENT_WALL_MS, armSessionAbort, noopAgent, packAnswer } from "../scripts/agent.ts";
+import { AGENT_WALL_MS, armSessionAbort, defaultAgent, noopAgent, packAnswer, RunnerUnavailable } from "../scripts/agent.ts";
 import { composeMessage, conflictTask, implementTask, personaFor, REVIEW_AXES, reviewPersona, reviewTask } from "../scripts/prompt.ts";
 import { PI_READ_ONLY_TOOLS, piSpawnHook, piTools, piTurn } from "../scripts/pi-session.ts";
 import { proxyEnv } from "../scripts/proxy.ts";
@@ -301,6 +301,31 @@ try {
   cancelEarly();
   await sleep(60);
   expectEqual("cleared abort does not fire", skipped, 0);
+
+  // The seam's other contract, at the adapter: a runner that never started THROWS instead of reporting
+  // a turn, so a node can tell "no agent saw this" from "the agent's work failed". An unknown model is
+  // knowable before any turn, and Pi resolves models locally - this costs no network and no session.
+  try {
+    await defaultAgent({
+      cwd: ".",
+      artifactsDir: mkTemp("pack-seam-art-"),
+      env: (base) => base,
+      sessionKey: "feat/01",
+      role: "implement",
+      model: "nope/nope",
+      thinkingLevel: "high",
+      persona: "PERSONA",
+      prompt: "go",
+    });
+    expect("a model the SDK cannot resolve is not a turn result", false);
+  } catch (e) {
+    expect("it is the seam's fatal kind", e instanceof RunnerUnavailable, String(e));
+    expect(
+      "and the message names the runner before the reason",
+      (e as Error).message.startsWith("the pi runner could not start: "),
+      (e as Error).message,
+    );
+  }
 
   console.log(JSON.stringify({ ok: true }));
 } catch (e) {

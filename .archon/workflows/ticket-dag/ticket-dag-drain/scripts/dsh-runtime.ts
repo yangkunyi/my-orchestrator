@@ -62,6 +62,7 @@ export class DshRuntime {
   private readonly pending = new Map<string, { resolve: (v: unknown) => void; reject: (e: Error) => void }>();
   private readonly stderr: string[] = [];
   private seq = 0;
+  private ready = false;
   private sawTurn = false;
   private idle: { resolve: () => void; reject: (e: Error) => void } | undefined;
   private ended: string | undefined;
@@ -172,6 +173,7 @@ export class DshRuntime {
       },
       INIT_TIMEOUT_MS,
     );
+    this.ready = true;
     const idle = new Promise<void>((resolve, reject) => {
       this.idle = { resolve, reject };
     });
@@ -181,6 +183,15 @@ export class DshRuntime {
       PROMPT_TIMEOUT_MS,
     );
     await idle;
+  }
+
+  /**
+   * Whether the harness answered initialize. Before that, any failure (no binary, a profile that
+   * cannot boot, a child that exits early) means the runtime never came up - the pack's dsh layer reads
+   * this to tell "cannot start" from "the turn went badly", which are different to a Ticket.
+   */
+  hasStarted(): boolean {
+    return this.ready;
   }
 
   finishReason(): string | undefined {

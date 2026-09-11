@@ -86,7 +86,7 @@ writeFileSync(
     `  await dshAgent({ cwd: process.cwd(), artifactsDir: process.cwd(), sessionKey: "feat/01", role: "implement", model: undefined, thinkingLevel: "high", prompt: "do it", persona: "PERSONA" });\n` +
     `  console.log(JSON.stringify({ threw: false }));\n` +
     `} catch (e) {\n` +
-    `  console.log(JSON.stringify({ threw: true, message: e instanceof Error ? e.message : String(e) }));\n` +
+    `  console.log(JSON.stringify({ threw: true, name: e instanceof Error ? e.name : "", message: e instanceof Error ? e.message : String(e) }));\n` +
     `}\n`,
 );
 
@@ -246,10 +246,22 @@ try {
   const bare = runScript(probe, work, { HOME: noHome, DSH_BIN: stub, DSH_HOME: home });
   const bareOut = JSON.parse((bare.stdout || "{}").trim().split("\n").pop() ?? "{}") as {
     threw?: boolean;
+    name?: string;
     message?: string;
   };
   expect("credentials are required", bareOut.threw === true);
   expect("and the error names what to set", (bareOut.message ?? "").includes("needs DEEPSEEK_BASE_URL"));
+  expectEqual("and it is the seam's fatal kind, not a turn", bareOut.name, "RunnerUnavailable");
+
+  // Credentials fine and the binary missing: this failure lands after every pre-flight check, so the
+  // adapter asks the runtime whether its handshake ever completed (dsh-runtime.ts hasStarted).
+  process.env.DSH_BIN = join(work, "no-such-dsh");
+  await expectReject(
+    "a dsh that cannot spawn is a runner that could not start",
+    () => run({ role: "implement", task, persona: personaFor("implement", "dsh", { skill }) }),
+    /the dsh runner could not start: /,
+  );
+  process.env.DSH_BIN = stub;
 
   // The dsh implement persona's tdd section is a pure function of the skill the caller hands it:
   // the tree-found and the tree-absent branch are both asserted here, with no child and no HOME.

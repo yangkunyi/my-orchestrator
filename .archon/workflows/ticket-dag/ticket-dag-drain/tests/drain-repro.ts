@@ -1,8 +1,8 @@
 #!/usr/bin/env bun
 /** Temp-Target repro: drain loop without Pi. Empty ticket branch FAILED-exits 0 so pick can empty. No Archon engine, no repo src/. */
-import { existsSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { noopAgent } from "../scripts/agent.ts";
+import { noopAgent, RunnerUnavailable } from "../scripts/agent.ts";
 import { rematchLeftovers } from "../scripts/rematch.ts";
 import { REVIEW_BASE_REL } from "../scripts/review-artifacts.ts";
 import { pickStartable } from "../scripts/pick.ts";
@@ -15,7 +15,9 @@ import {
   envWithout,
   expect,
   expectEqual,
+  expectReject,
   gitC,
+  mkTemp,
   runScript,
   statusOf,
   ticketOf,
@@ -186,14 +188,191 @@ try {
       await implementTicket(root, "feat/01", {
         artifactsDir: artifacts,
         runAgent: async () => {
-          throw new Error("no credentials");
+          // Not a RunnerUnavailable: an unexpected throw from a runner is that runner's bug. The node
+          // still fails this one Ticket rather than the drain - only "cannot start" stops everything.
+          throw new Error("the runner blew up in a way the seam does not know");
         },
       });
     } finally {
       console.error = realError;
     }
     expectEqual("a turn with no session reports none", saw.find((l) => l.includes(" session ")), undefined);
-    expect("the failure is still recorded", saw.some((l) => l.includes("FAILED: no credentials")), saw.join(" | "));
+    expect(
+      "an unexpected throw is still this Ticket's failure",
+      saw.some((l) => l.includes("FAILED: the runner blew up in a way the seam does not know")),
+      saw.join(" | "),
+    );
+  });
+
+  // The runner never started: no agent saw this Ticket, so nothing here is a statement about the
+  // Ticket's work. The reason goes where every other reason goes, the Status stops being RUNNING, and
+  // the error leaves the node - the CLI routes below pin that it exits non-zero, because a non-zero
+  // exit is the pack's only way to stop a drain (ADR-0032: a Git-contract FAILED exits 0).
+  await withTarget(async (root, artifacts) => {
+    const r01 = writeTicket(root, "feat", "01", "one", "READY", "None");
+    const r02 = writeTicket(root, "feat", "02", "two", "READY", "None");
+    commitTickets(root);
+    const saw: string[] = [];
+    const realError = console.error;
+    console.error = (...args: unknown[]) => {
+      saw.push(args.map(String).join(" "));
+    };
+    try {
+      await expectReject(
+        "a runner that cannot start is not this Ticket's outcome",
+        () =>
+          implementTicket(root, "feat/01", {
+            artifactsDir: artifacts,
+            runAgent: async () => {
+              throw new RunnerUnavailable("the dsh runner needs DEEPSEEK_BASE_URL + DEEPSEEK_API_KEY");
+            },
+          }),
+        /the dsh runner needs DEEPSEEK_BASE_URL/,
+      );
+    } finally {
+      console.error = realError;
+    }
+    expectEqual(
+      "the attempt is recorded with its reason",
+      saw.find((l) => l.includes(" FAILED: ")),
+      "feat/01 FAILED: the dsh runner needs DEEPSEEK_BASE_URL + DEEPSEEK_API_KEY",
+    );
+    expectEqual("the aborted Ticket is FAILED, not left RUNNING", statusOf(root, r01), "FAILED");
+    expectEqual("the rest of the backlog is untouched", statusOf(root, r02), "READY");
+  });
+
+  // The conflict node answers to the same rule: a runner that could not start is not a conflict
+  // outcome either.
+  await withTarget(async (root, artifacts) => {
+    const rel = writeTicket(root, "feat", "01", "one", "READY", "None");
+    commitTickets(root);
+    addTicketWorktree(root, ticketOf(root, "feat/01"));
+    await expectReject(
+      "the conflict node lets the same error out",
+      () =>
+        conflictTicket(root, "feat/01", {
+          artifactsDir: artifacts,
+          runAgent: async () => {
+            throw new RunnerUnavailable("the pi runner could not start: unknown model nope/nope");
+          },
+        }),
+      /the pi runner could not start/,
+    );
+    expectEqual("conflict records the attempt too", statusOf(root, rel), "FAILED");
+  });
+
+  // The other route, so the two can never collapse into one: a turn that ran and failed keeps the git
+  // contract's outcome, the node returns instead of throwing, and the turn's own error is the reason.
+  await withTarget(async (root, artifacts) => {
+    const rel = writeTicket(root, "feat", "01", "one", "READY", "None");
+    commitTickets(root);
+    const saw: string[] = [];
+    const realError = console.error;
+    console.error = (...args: unknown[]) => {
+      saw.push(args.map(String).join(" "));
+    };
+    let token: string;
+    try {
+      token = await implementTicket(root, "feat/01", {
+        artifactsDir: artifacts,
+        runAgent: async () => ({
+          sessionFile: join(artifacts, "feat-01.jsonl"),
+          answer: { kind: "none" },
+          lastError: "Request timed out.",
+        }),
+      });
+    } finally {
+      console.error = realError;
+    }
+    expectEqual("a failed turn is this Ticket's outcome", token, "failed");
+    expectEqual("and its Status is FAILED as before", statusOf(root, rel), "FAILED");
+    expect(
+      "the turn's own error is the recorded reason",
+      saw.some((l) => l.includes("FAILED: ") && l.includes("Request timed out.")),
+      saw.join(" | "),
+    );
+  });
+
+  // Through the real node and a real runner that cannot start. dsh with no credentials is the cheapest
+  // honest one: it is knowable before any turn, needs no child and no network.
+  await withTarget(async (root, artifacts) => {
+    const r01 = writeTicket(root, "feat", "01", "one", "READY", "None");
+    const r02 = writeTicket(root, "feat", "02", "two", "READY", "None");
+    commitTickets(root);
+    mkdirSync(join(root, ".scratch"), { recursive: true });
+    writeFileSync(join(root, ".scratch", "ticket-dag.yaml"), "runner: dsh\n");
+    const proc = runScript(implementScript, root, {
+      ...envWithout("DEEPSEEK_BASE_URL", "DEEPSEEK_API_KEY"),
+      INPUTS_TICKET: "feat/01",
+      ARTIFACTS_DIR: artifacts,
+      // A HOME with no ~/.pi/agent/models.json: the packy fallback cannot answer either.
+      HOME: mkTemp("pack-nohome-"),
+    });
+    expect(
+      "a dsh node that cannot start exits non-zero",
+      (proc.status ?? 0) !== 0,
+      `status ${proc.status}: ${proc.stderr}`,
+    );
+    expect(
+      "and says which runner could not start",
+      proc.stderr.includes("the dsh runner needs DEEPSEEK_BASE_URL"),
+      proc.stderr,
+    );
+    expectEqual("no Git-contract token was claimed", proc.stdout.trim(), "");
+    expectEqual("the Ticket it began is FAILED", statusOf(root, r01), "FAILED");
+    expectEqual("the backlog is untouched", statusOf(root, r02), "READY");
+  });
+
+  // Not every "cannot start" is a pre-flight check: a `dsh` that cannot spawn is only knowable when the
+  // child fails, which is why the adapter asks the runtime whether its handshake ever completed.
+  await withTarget(async (root, artifacts) => {
+    const r01 = writeTicket(root, "feat", "01", "one", "READY", "None");
+    commitTickets(root);
+    mkdirSync(join(root, ".scratch"), { recursive: true });
+    writeFileSync(join(root, ".scratch", "ticket-dag.yaml"), "runner: dsh\n");
+    const proc = runScript(implementScript, root, {
+      INPUTS_TICKET: "feat/01",
+      ARTIFACTS_DIR: artifacts,
+      // Credentials are perfect and the binary is not there: the failure lands after the pre-flight
+      // checks, which is exactly the case a pre-flight-only fix would still report as this Ticket's.
+      DSH_BIN: join(mkTemp("pack-nodsh-"), "no-such-dsh"),
+      DEEPSEEK_BASE_URL: "https://gateway.invalid/v1",
+      DEEPSEEK_API_KEY: "test-key",
+      DSH_HOME: mkTemp("pack-dsh-home-"),
+    });
+    expect(
+      "a dsh that cannot spawn exits non-zero",
+      (proc.status ?? 0) !== 0,
+      `status ${proc.status}: ${proc.stderr}`,
+    );
+    expect(
+      "and says the runner could not start",
+      proc.stderr.includes("the dsh runner could not start: "),
+      proc.stderr,
+    );
+    expectEqual("the Ticket it began is FAILED", statusOf(root, r01), "FAILED");
+  });
+
+  // The same through the pi runner: an unknown model is a start failure, not a Ticket's work.
+  await withTarget(async (root, artifacts) => {
+    const r01 = writeTicket(root, "feat", "01", "one", "READY", "None");
+    const r02 = writeTicket(root, "feat", "02", "two", "READY", "None");
+    commitTickets(root);
+    mkdirSync(join(root, ".scratch"), { recursive: true });
+    writeFileSync(join(root, ".scratch", "ticket-dag.yaml"), "model: nope/nope\n");
+    const proc = runScript(implementScript, root, { INPUTS_TICKET: "feat/01", ARTIFACTS_DIR: artifacts });
+    expect(
+      "a pi node that cannot start exits non-zero",
+      (proc.status ?? 0) !== 0,
+      `status ${proc.status}: ${proc.stderr}`,
+    );
+    expect(
+      "and names the runner before the reason",
+      proc.stderr.includes("the pi runner could not start: "),
+      proc.stderr,
+    );
+    expectEqual("the Ticket it began is FAILED", statusOf(root, r01), "FAILED");
+    expectEqual("the backlog is untouched", statusOf(root, r02), "READY");
   });
 
   console.log(JSON.stringify({ ok: true }));

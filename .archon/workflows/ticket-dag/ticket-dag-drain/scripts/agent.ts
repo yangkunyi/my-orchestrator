@@ -72,6 +72,21 @@ export function packAnswer(text: string | undefined): PackAnswer {
 
 export type AgentRunner = (opts: PackAgentOpts) => Promise<PackAgentResult>;
 
+/**
+ * The runner never got to start - no credentials, no persona, a model the SDK cannot resolve, a child
+ * that cannot spawn - so no turn ever ran on this Ticket. A returned PackAgentResult says something
+ * about a turn; this says the turn never happened, and the two need different answers: a Ticket no
+ * agent saw is not a Ticket whose work failed. A node lets this one out, so the node exits non-zero
+ * and the drain stops instead of writing the git contract's FAILED for every startable Ticket
+ * (node-entry.ts: a Git-contract outcome exits 0, a throw does not).
+ */
+export class RunnerUnavailable extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "RunnerUnavailable";
+  }
+}
+
 export type TicketAgentOpts = {
   artifactsDir: string;
   config?: PackConfig;
