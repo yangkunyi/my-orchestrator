@@ -2,7 +2,7 @@
 /** Temp-Target repro: drain-end summary node. Fake agent, no live Pi, no Archon engine, no repo src/. */
 import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
-import { type AgentRunner, type PackAgentOpts, type TicketAgentOpts } from "../scripts/agent.ts";
+import { type AgentRunner, type TicketAgentOpts } from "../scripts/agent.ts";
 import { REVIEW_AXES, summaryPersona } from "../scripts/prompt.ts";
 import { reviewDrain } from "../scripts/review.ts";
 import {
@@ -15,9 +15,9 @@ import {
 } from "../scripts/review-artifacts.ts";
 import { REVIEW_WALL_MS } from "../scripts/roles.ts";
 import { runReportNode, type ReportNode } from "../scripts/report-node.ts";
-import { roleSessionFile } from "../scripts/session-log.ts";
+import { roleSessionFile } from "../scripts/pi-session.ts";
 import { summarizeDrain } from "../scripts/summary.ts";
-import { envWithout, expect, expectEqual, gitC, runScript, withTarget } from "./target.ts";
+import { envWithout, expect, expectEqual, gitC, recordingAgent, runScript, withTarget } from "./target.ts";
 
 const summaryScript = join(import.meta.dir, "../scripts/summary.ts");
 const drainYaml = join(import.meta.dir, "../ticket-dag-drain.yaml");
@@ -27,28 +27,6 @@ function readOut(artifacts: string): string {
 }
 
 const REVIEWS = REVIEW_AXES.map((axis, i) => `## ${i + 1}. ${axis}\n\naxis ${i + 1} findings\n`).join("\n");
-
-/**
- * A runner that answers `answer` and leaves `log` in the session file it owns. The log is there to
- * prove the node never reads it: one answer channel means the runner's own answer is the only one.
- */
-function fakeAgent(
-  answer: string,
-  log = answer,
-): { run: AgentRunner; calls: () => number; all: () => PackAgentOpts[] } {
-  const seen: PackAgentOpts[] = [];
-  const run: AgentRunner = async (opts) => {
-    seen.push(opts);
-    const sessionFile = roleSessionFile(opts.artifactsDir, opts.sessionKey, opts.role);
-    mkdirSync(dirname(sessionFile), { recursive: true });
-    writeFileSync(
-      sessionFile,
-      `${JSON.stringify({ type: "message", message: { role: "assistant", content: log } })}\n`,
-    );
-    return { sessionFile, answer: { kind: "text", text: answer }, lastError: undefined };
-  };
-  return { run, calls: () => seen.length, all: () => seen };
-}
 
 async function withReview(
   fn: (root: string, artifacts: string, base: string, head: string) => Promise<void>,
@@ -67,7 +45,7 @@ async function withReview(
 try {
   // Nothing to merge: every one of these must skip without spending an agent.
   await withTarget(async (root, artifacts) => {
-    const fake = fakeAgent("should not run");
+    const fake = recordingAgent("should not run");
     await summarizeDrain(root, { artifactsDir: artifacts, runAgent: fake.run });
     expectEqual("no review-base does not call agent", fake.calls(), 0);
     expectEqual("no review-base skip", readOut(artifacts), "skip: no review-base\n");
@@ -75,7 +53,7 @@ try {
 
   await withTarget(async (root, artifacts) => {
     writeFileSync(join(artifacts, REVIEW_BASE_REL), "\n");
-    const fake = fakeAgent("should not run");
+    const fake = recordingAgent("should not run");
     await summarizeDrain(root, { artifactsDir: artifacts, runAgent: fake.run });
     expectEqual("empty review-base does not call agent", fake.calls(), 0);
     expectEqual("empty review-base skip", readOut(artifacts), "skip: empty review-base\n");
@@ -91,7 +69,7 @@ try {
     await withTarget(async (root, artifacts) => {
       writeFileSync(join(artifacts, REVIEW_BASE_REL), "deadbeefdeadbeefdeadbeefdeadbeefdeadbeef\n");
       if (reviewMd !== undefined) writeFileSync(join(artifacts, REVIEW_MD_REL), reviewMd);
-      const fake = fakeAgent("should not run");
+      const fake = recordingAgent("should not run");
       await summarizeDrain(root, { artifactsDir: artifacts, runAgent: fake.run });
       expectEqual(`${name} does not call agent`, fake.calls(), 0);
       expectEqual(`${name} skip`, readOut(artifacts), want);
@@ -99,7 +77,7 @@ try {
   }
 
   await withReview(async (root, artifacts, base, head) => {
-    const fake = fakeAgent("summary from the runner", "summary from the session log");
+    const fake = recordingAgent("summary from the runner", "summary from the session log");
     await summarizeDrain(root, {
       artifactsDir: artifacts,
       runAgent: fake.run,
@@ -181,7 +159,7 @@ try {
   });
 
   await withReview(async (root, artifacts) => {
-    const fake = fakeAgent("another runner");
+    const fake = recordingAgent("another runner");
     await summarizeDrain(root, {
       artifactsDir: artifacts,
       runAgent: fake.run,
@@ -215,12 +193,12 @@ try {
   // summary.ts spends no agent on it. Hand-written fixtures are how the pair drifted once already.
   await withTarget(async (root, artifacts) => {
     await writeReviewBase(root, artifacts);
-    const reviewer = fakeAgent("should not run");
+    const reviewer = recordingAgent("should not run");
     await reviewDrain(root, { artifactsDir: artifacts, runAgent: reviewer.run });
     expectEqual("empty-range review spends no agent", reviewer.calls(), 0);
     const reviewMd = readFileSync(join(artifacts, REVIEW_MD_REL), "utf8");
     expect("empty-range review.md is a skip", reviewMd.startsWith("skip:"));
-    const summariser = fakeAgent("should not run");
+    const summariser = recordingAgent("should not run");
     await summarizeDrain(root, { artifactsDir: artifacts, runAgent: summariser.run });
     expectEqual("empty-range summary spends no agent", summariser.calls(), 0);
     expectEqual(
@@ -262,7 +240,7 @@ try {
   });
   for (const [name, node, rel, fallback] of conformance) {
     await withTarget(async (root, artifacts) => {
-      const fake = fakeAgent("should not run");
+      const fake = recordingAgent("should not run");
       await node(root, { artifactsDir: artifacts, runAgent: fake.run });
       expectEqual(
         `${name} base skip is the owner's line`,

@@ -3,8 +3,10 @@
 import { execFileSync, spawnSync } from "node:child_process";
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
+import { type AgentRunner, type PackAgentOpts } from "../scripts/agent.ts";
 import { isLockHeld, completeTicket, integrateCurrentMainIntoWorktree, tryMerge, withMergeLock } from "../scripts/main-writes.ts";
+import { roleSessionFile } from "../scripts/pi-session.ts";
 import { parseStatus, type Status } from "../scripts/ticket-line.ts";
 import { scanTickets, type Ticket } from "../scripts/tickets.ts";
 
@@ -179,6 +181,29 @@ export function runScript(
     env: { ...process.env, NODE_USE_ENV_PROXY: "1", ...env },
   });
   return { stdout: r.stdout ?? "", stderr: r.stderr ?? "", status: r.status };
+}
+
+/**
+ * A runner that answers `answer` and leaves `log` in the session file it owns. The log is there to
+ * prove the node never reads it: one answer channel means the runner's own answer is the only one.
+ * `all()` is every opts the node handed it, in call order; `calls()` is how many turns it ran.
+ */
+export function recordingAgent(
+  answer: string,
+  log: string = answer,
+): { run: AgentRunner; calls: () => number; all: () => PackAgentOpts[] } {
+  const seen: PackAgentOpts[] = [];
+  const run: AgentRunner = async (opts) => {
+    seen.push(opts);
+    const sessionFile = roleSessionFile(opts.artifactsDir, opts.sessionKey, opts.role);
+    mkdirSync(dirname(sessionFile), { recursive: true });
+    writeFileSync(
+      sessionFile,
+      `${JSON.stringify({ type: "message", message: { role: "assistant", content: log } })}\n`,
+    );
+    return { sessionFile, answer: { kind: "text", text: answer }, lastError: undefined };
+  };
+  return { run, calls: () => seen.length, all: () => seen };
 }
 
 // Self-check: the fixture builds a Target, writes a Ticket, and reads its Status back.

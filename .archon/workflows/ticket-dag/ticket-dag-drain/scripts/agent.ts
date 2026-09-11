@@ -1,5 +1,4 @@
 import type { PackConfig, Runner, ThinkingLevel } from "./config.ts";
-import { roleSessionFile } from "./session-log.ts";
 
 export type AgentRole = "implement" | "conflict" | "review" | "summary";
 
@@ -103,7 +102,10 @@ export function armSessionAbort(session: { abort: () => Promise<void> }, wallMs:
 
 export async function noopAgent(opts: PackAgentOpts): Promise<PackAgentResult> {
   return {
-    sessionFile: roleSessionFile(opts.artifactsDir, opts.sessionKey, opts.role),
+    // A double that starts nothing, so it has no session to point at: the empty string is the
+    // field's "no session" value. The seam may not spell a runner's path formula, and nothing in
+    // production calls this - only tests.
+    sessionFile: "",
     answer: { kind: "none" },
     lastError: undefined,
   };

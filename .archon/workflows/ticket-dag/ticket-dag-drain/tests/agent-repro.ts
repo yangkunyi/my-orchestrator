@@ -4,9 +4,8 @@ import { mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { AGENT_WALL_MS, armSessionAbort, defaultAgent, noopAgent, packAnswer, RunnerUnavailable } from "../scripts/agent.ts";
 import { composeMessage, conflictPersona, conflictTask, implementPersona, implementTask, REVIEW_AXES, reviewPersona, reviewTask } from "../scripts/prompt.ts";
-import { PI_READ_ONLY_TOOLS, piSpawnHook, piTools, piTurn } from "../scripts/pi-session.ts";
+import { PI_READ_ONLY_TOOLS, piSpawnHook, piTools, piTurn, readPiSession, roleSessionFile } from "../scripts/pi-session.ts";
 import { proxyEnv } from "../scripts/proxy.ts";
-import { readPiSession, roleSessionFile } from "../scripts/session-log.ts";
 import { REVIEW_WALL_MS } from "../scripts/roles.ts";
 import { sessionEnv, sessionSpawnEnv } from "../scripts/worktree-env.ts";
 import { expect, expectEqual, mkTemp, sleep } from "./target.ts";
@@ -141,7 +140,7 @@ try {
       persona: "PERSONA",
       prompt: impl,
     });
-    expectEqual("noop does not start Pi", noop.sessionFile, sessionFile);
+    expectEqual("noop opens no session, so it names none", noop.sessionFile, "");
     expectEqual("noop answers no text", noop.answer, { kind: "none" });
     expectEqual("noop has no lastError", noop.lastError, undefined);
   } finally {
@@ -209,6 +208,16 @@ try {
   expect("the seam requires a persona", /^\s*persona: string;$/m.test(seamSrc));
   expect("the seam's answer channel is required", /^\s*answer: PackAnswer;$/m.test(seamSrc));
   expect("the seam declares no tool allowlist", !/^\s*(tools|useBash)\??:/m.test(seamSrc));
+  // The seam may not statically import a runner: defaultAgent loads one with a dynamic import, and
+  // that is the only place a runner name belongs here. A static import would put a runner's path
+  // formula back in the seam - the session-log.ts leak this round removed. Checked over every static
+  // import line, so re-adding one fails here instead of quietly returning.
+  const seamImports = seamSrc.split("\n").filter((line) => /^import\b/.test(line));
+  expect(
+    "the seam statically imports no runner",
+    seamImports.every((line) => !/from "\.\/(?:pi-session|dsh-agent|session-log)\.ts"/.test(line)),
+    seamImports,
+  );
 
   const rp = composeMessage(
     reviewPersona("abc", REVIEW_AXES[0]),

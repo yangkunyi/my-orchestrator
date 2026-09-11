@@ -1,10 +1,10 @@
 #!/usr/bin/env bun
 /** Temp-Target repro: drain-end review node. Fake agent, no live Pi, no Archon engine, no repo src/. */
-import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
-import { dirname, join } from "node:path";
-import { type AgentRunner, type PackAgentOpts } from "../scripts/agent.ts";
+import { readFileSync, writeFileSync } from "node:fs";
+import { join } from "node:path";
+import { type AgentRunner } from "../scripts/agent.ts";
 import { axisHeading, REVIEW_AXES } from "../scripts/prompt.ts";
-import { roleSessionFile } from "../scripts/session-log.ts";
+import { roleSessionFile } from "../scripts/pi-session.ts";
 import { rematchLeftovers } from "../scripts/rematch.ts";
 import { reviewDrain } from "../scripts/review.ts";
 import {
@@ -24,6 +24,7 @@ import {
   expect,
   expectEqual,
   gitC,
+  recordingAgent,
   runScript,
   withTarget,
 } from "./target.ts";
@@ -38,28 +39,6 @@ function section(body: string, i: number): string {
   const part = body.split(/^## /m)[i + 1] ?? "";
   const nl = part.indexOf("\n");
   return nl < 0 ? "" : part.slice(nl);
-}
-
-/**
- * A runner that answers `answer` and leaves `log` in the session file it owns. The log is there to
- * prove the node never reads it: one answer channel means the runner's own answer is the only one.
- */
-function fakeAgent(
-  answer: string,
-  log = answer,
-): { run: AgentRunner; calls: () => number; all: () => PackAgentOpts[] } {
-  const seen: PackAgentOpts[] = [];
-  const run: AgentRunner = async (opts) => {
-    seen.push(opts);
-    const sessionFile = roleSessionFile(opts.artifactsDir, opts.sessionKey, opts.role);
-    mkdirSync(dirname(sessionFile), { recursive: true });
-    writeFileSync(
-      sessionFile,
-      `${JSON.stringify({ type: "message", message: { role: "assistant", content: log } })}\n`,
-    );
-    return { sessionFile, answer: { kind: "text", text: answer }, lastError: undefined };
-  };
-  return { run, calls: () => seen.length, all: () => seen };
 }
 
 try {
@@ -132,7 +111,7 @@ try {
   );
 
   await withTarget(async (root, artifacts) => {
-    const fake = fakeAgent("should not run");
+    const fake = recordingAgent("should not run");
     await reviewDrain(root, { artifactsDir: artifacts, runAgent: fake.run });
     expectEqual("missing review-base does not call agent", fake.calls(), 0);
     expectEqual("missing review-base skip", readOut(artifacts), "skip: no review-base\n");
@@ -157,7 +136,7 @@ try {
 
   await withTarget(async (root, artifacts) => {
     writeFileSync(join(artifacts, REVIEW_BASE_REL), "\n");
-    const fake = fakeAgent("should not run");
+    const fake = recordingAgent("should not run");
     await reviewDrain(root, { artifactsDir: artifacts, runAgent: fake.run });
     expectEqual("empty review-base does not call agent", fake.calls(), 0);
     expectEqual("empty review-base skip", readOut(artifacts), "skip: empty review-base\n");
@@ -165,7 +144,7 @@ try {
 
   await withTarget(async (root, artifacts) => {
     await writeReviewBase(root, artifacts);
-    const fake = fakeAgent("should not run");
+    const fake = recordingAgent("should not run");
     await reviewDrain(root, { artifactsDir: artifacts, runAgent: fake.run });
     expectEqual("empty diff does not call agent", fake.calls(), 0);
     const body = readOut(artifacts);
@@ -174,7 +153,7 @@ try {
 
   await withTarget(async (root, artifacts) => {
     writeFileSync(join(artifacts, REVIEW_BASE_REL), "deadbeefdeadbeefdeadbeefdeadbeefdeadbeef\n");
-    const fake = fakeAgent("should not run");
+    const fake = recordingAgent("should not run");
     await reviewDrain(root, { artifactsDir: artifacts, runAgent: fake.run });
     expectEqual("bad base does not call agent", fake.calls(), 0);
     expect("git diff fail writes error", readOut(artifacts).startsWith("review error: git diff"));
@@ -186,7 +165,7 @@ try {
     gitC(root, "add", "work.txt");
     gitC(root, "commit", "-m", "work");
     const head = gitC(root, "rev-parse", "HEAD");
-    const fake = fakeAgent("bug: missing test");
+    const fake = recordingAgent("bug: missing test");
     await reviewDrain(root, {
       artifactsDir: artifacts,
       runAgent: fake.run,
@@ -270,7 +249,7 @@ try {
     writeFileSync(join(root, "work.txt"), "y\n");
     gitC(root, "add", "work.txt");
     gitC(root, "commit", "-m", "work");
-    const fake = fakeAgent("answer from the runner", "text from the session log");
+    const fake = recordingAgent("answer from the runner", "text from the session log");
     await reviewDrain(root, { artifactsDir: artifacts, runAgent: fake.run });
     const body = readOut(artifacts);
     expectEqual(
@@ -293,7 +272,7 @@ try {
     writeFileSync(join(root, "work.txt"), "x\n");
     gitC(root, "add", "work.txt");
     gitC(root, "commit", "-m", "work");
-    const fake = fakeAgent("ok");
+    const fake = recordingAgent("ok");
     let calls = 0;
     const flaky: AgentRunner = async (opts) => {
       calls += 1;
@@ -331,7 +310,7 @@ try {
   // the directory and turn a skip into a throw.
   await withTarget(async (root, artifacts) => {
     const fresh = join(artifacts, "fresh");
-    const fake = fakeAgent("should not run");
+    const fake = recordingAgent("should not run");
     await reviewDrain(root, { artifactsDir: fresh, runAgent: fake.run });
     expectEqual(
       "a fresh ARTIFACTS_DIR gets the base skip",

@@ -19,7 +19,7 @@ import {
   type TddSkill,
 } from "../scripts/prompt.ts";
 import { REVIEW_WALL_MS, ROLES, roleAgent } from "../scripts/roles.ts";
-import { roleSessionFile } from "../scripts/session-log.ts";
+import { roleSessionFile } from "../scripts/pi-session.ts";
 import { expect, expectEqual, mkTemp } from "./target.ts";
 
 const ARTIFACTS = "/artifacts";
