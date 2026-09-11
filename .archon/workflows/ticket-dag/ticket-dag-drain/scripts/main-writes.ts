@@ -11,8 +11,7 @@ import {
 } from "node:fs";
 import { isAbsolute, join, resolve } from "node:path";
 import { git, gitOrThrow, removeWorktreeAndBranch, revParse } from "./git.ts";
-import { mergeMessage, statusLine, statusMessage, type Status } from "./ticket-line.ts";
-import type { Ticket } from "./tickets.ts";
+import { mergeMessage, statusLine, statusMessage, type Status, type Ticket } from "./tickets.ts";
 
 /**
  * The Main-write seam. Every function here writes Main and asserts the caller already holds the

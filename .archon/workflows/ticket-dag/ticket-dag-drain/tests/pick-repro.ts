@@ -4,6 +4,7 @@ import { existsSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { rematchLeftovers } from "../scripts/rematch.ts";
 import { pickStartable } from "../scripts/pick.ts";
+import { STATUSES, statusClass, type StatusClass } from "../scripts/tickets.ts";
 import {
   addTicketWorktree,
   commitFile,
@@ -34,6 +35,24 @@ function listNonDot(dir: string): string[] {
 }
 
 try {
+  // The classification has one owner (tickets.ts): every Status maps to exactly one meaning, and both
+  // of the drain's gates - pick's startable set and the leftover pass's in-flight set - read that map.
+  // These pin the meanings; that a new Status cannot be left unclassified is tsc's job (the Record).
+  const classified = new Map<StatusClass, string[]>();
+  for (const status of STATUSES) {
+    const cls = statusClass(status);
+    classified.set(cls, [...(classified.get(cls) ?? []), status]);
+  }
+  expectEqual("startable classification", classified.get("startable"), ["READY", "FAILED"]);
+  expectEqual(
+    "in-flight classification",
+    classified.get("in-flight"),
+    ["RUNNING", "MERGING", "CONFLICT", "RESOLVING"],
+  );
+  expectEqual("blocked classification", classified.get("blocked"), ["BLOCKED"]);
+  expectEqual("merged classification", classified.get("merged"), ["MERGED"]);
+  expectEqual("every Status has a class", [...classified.values()].flat().length, STATUSES.length);
+
   await withTarget(async (root, artifacts, state) => {
     const r01 = writeTicket(root, "feat", "01", "one", "MERGED", "None");
     const r02 = writeTicket(root, "feat", "02", "two", "BLOCKED", "01");

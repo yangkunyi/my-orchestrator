@@ -3,7 +3,7 @@
 import { execFileSync } from "node:child_process";
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { beginTicket } from "../scripts/begin.ts";
+import { beginTicket } from "../scripts/transitions.ts";
 import {
   addTicketWorktree,
   commitFile,

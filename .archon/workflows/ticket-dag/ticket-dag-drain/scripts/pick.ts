@@ -1,35 +1,28 @@
 import { addAttempted, readAttempted } from "./attempted.ts";
-import { hasTicketMergeCommit, stamp, withMergeLock } from "./main-writes.ts";
+import { hasTicketMergeCommit, withMergeLock } from "./main-writes.ts";
 import { runNode } from "./node-entry.ts";
 import { nodeLine } from "./node-outcomes.ts";
-import { blockersMerged, byId, scanTickets, type Ticket } from "./tickets.ts";
+import { blockersMerged, byId, isStartable, scanTickets, type Ticket } from "./tickets.ts";
+import { openUnblocked } from "./transitions.ts";
 
 export type PickOpts = {
   concurrency: number;
   artifactsDir: string;
 };
 
-function isStartableStatus(status: Ticket["status"]): boolean {
-  return status === "READY" || status === "FAILED";
-}
-
 export async function pickStartable(target: string, opts: PickOpts): Promise<Ticket[]> {
   const { concurrency, artifactsDir } = opts;
   return withMergeLock(target, async () => {
     const attempted = readAttempted(artifactsDir);
-    const current = scanTickets(target);
-    const curMap = byId(current);
-    for (const t of current) {
-      if (t.status === "BLOCKED" && blockersMerged(t, curMap)) {
-        await stamp(target, t, "READY");
-      }
-    }
+    // The BLOCKED -> READY stamps are transitions.ts's verb; pick opens the transaction it runs in,
+    // so the stamps and the pick below see one Main.
+    await openUnblocked(target);
     const tickets = scanTickets(target);
     const map = byId(tickets);
     const picked: Ticket[] = [];
     for (const t of tickets) {
       if (picked.length >= Math.max(0, concurrency)) break;
-      if (!isStartableStatus(t.status)) continue;
+      if (!isStartable(t.status)) continue;
       if (!blockersMerged(t, map)) continue;
       if (attempted.has(t.id)) continue;
       if (await hasTicketMergeCommit(target, t.branch)) continue;

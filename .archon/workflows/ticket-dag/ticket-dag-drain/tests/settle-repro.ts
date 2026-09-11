@@ -5,7 +5,7 @@
  */
 import { existsSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { beginTicket } from "../scripts/begin.ts";
+import { beginTicket, settleAfterAgent } from "../scripts/transitions.ts";
 import {
   ensureGitignoreLine,
   failTicket,
@@ -14,7 +14,6 @@ import {
   tryMerge,
   withMergeLock,
 } from "../scripts/main-writes.ts";
-import { settleAfterAgent } from "../scripts/settle.ts";
 import { ensureWorktreesIgnored } from "../scripts/worktree-env.ts";
 import {
   addTicketWorktree,
