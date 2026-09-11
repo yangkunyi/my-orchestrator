@@ -119,6 +119,19 @@ export async function completeTicket(target: string, ticket: Ticket): Promise<vo
   await removeWorktreeAndBranch(target, ticket);
 }
 
+/**
+ * The one writer of a FAILED Status, and the one place a Ticket's failure reason is recorded - every
+ * failure route ends here (begin's two post-lock sites, a node's catch block, settle's own sequence),
+ * so no FAILED can be silent. It keeps the stderr wording the drain already promised
+ * (`<id> FAILED: <reason>`), and ADR-0042's lock policy: this asserts the caller's transaction, and
+ * each caller opens one - its own when it holds none.
+ */
+export async function failTicket(target: string, ticket: Ticket, reason: string): Promise<void> {
+  assertLockHeld("failTicket");
+  console.error(`${ticket.id} FAILED: ${reason}`);
+  await stamp(target, ticket, "FAILED");
+}
+
 /** True iff Main has that Ticket's --no-ff merge commit (message + second parent on the branch). */
 export async function hasTicketMergeCommit(target: string, branch: string): Promise<boolean> {
   const log = await git(target, ["log", "--format=%P%x00%s", "HEAD"]);

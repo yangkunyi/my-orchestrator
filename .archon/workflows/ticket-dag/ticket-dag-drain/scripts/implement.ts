@@ -1,11 +1,12 @@
 import { defaultAgent, type AgentRunner, type TicketAgentOpts } from "./agent.ts";
 import { beginTicket } from "./begin.ts";
 import { loadConfig, type PackConfig } from "./config.ts";
+import { failTicket, withMergeLock } from "./main-writes.ts";
 import { runNode } from "./node-entry.ts";
 import { nodeLine, type SettleResult } from "./node-outcomes.ts";
 import { implementTask } from "./prompt.ts";
 import { roleAgent } from "./roles.ts";
-import { fail, settleAfterAgent } from "./settle.ts";
+import { settleAfterAgent } from "./settle.ts";
 import { scanTickets } from "./tickets.ts";
 
 export type { TicketAgentOpts };
@@ -36,7 +37,10 @@ export async function implementTicket(
     console.error(`${ticket.id} session ${turn.sessionFile}`);
     return settleAfterAgent(target, ticket, begun.worktree, turn.lastError);
   } catch (e) {
-    await fail(target, ticket, e instanceof Error ? e.message : String(e));
+    // The turn threw where a returned outcome is expected: one FAILED stamp, its own transaction.
+    await withMergeLock(target, () =>
+      failTicket(target, ticket, e instanceof Error ? e.message : String(e)),
+    );
     return "failed";
   }
 }

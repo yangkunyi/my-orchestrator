@@ -5,6 +5,7 @@ import { join } from "node:path";
 import { beginTicket } from "../scripts/begin.ts";
 import { runNode } from "../scripts/node-entry.ts";
 import { EMPTY_PICK, nodeLine, RESOLVE } from "../scripts/node-outcomes.ts";
+import { settleAfterAgent } from "../scripts/settle.ts";
 import { scanTickets } from "../scripts/tickets.ts";
 import {
   commitFile,
@@ -19,7 +20,6 @@ import {
 } from "./target.ts";
 
 const pickScript = join(import.meta.dir, "../scripts/pick.ts");
-const settleScript = join(import.meta.dir, "../scripts/settle.ts");
 const drainYaml = join(import.meta.dir, "../ticket-dag-drain.yaml");
 const executeYaml = join(import.meta.dir, "../../ticket-dag-execute/ticket-dag-execute.yaml");
 
@@ -81,10 +81,11 @@ try {
     writeFileSync(join(root, "f"), "c\n");
     gitC(root, "add", "f");
     gitC(root, "commit", "-m", "mainline");
-    const proc = runScript(settleScript, root, { INPUTS_TICKET: "feat/01" });
-    expectEqual("conflict settle token", nodeOutput(proc.stdout), RESOLVE);
-    expectEqual("and the execute YAML gates on it", nodeOutput(proc.stdout), whenLiteral(execute));
-    expectEqual("as one newline-terminated token", proc.stdout, nodeLine(RESOLVE));
+    // settle is a library the implement/conflict nodes call, not a node of its own - so its outcome
+    // is asserted here in process, and pick's spawn below is what keeps the node protocol pinned.
+    const settled = await settleAfterAgent(root, ticketOf(root, "feat/01"), begun.worktree);
+    expectEqual("the conflict route returns the resolve token", settled, RESOLVE);
+    expectEqual("and the execute YAML gates on it", settled, whenLiteral(execute));
   });
 
   await withTarget(async (root, artifacts) => {

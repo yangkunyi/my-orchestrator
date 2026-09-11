@@ -1,27 +1,22 @@
-import { existsSync } from "node:fs";
-import { join } from "node:path";
+/**
+ * The settle sequence: the merge route for one Ticket, and the FAILED transitions it decides on.
+ * Every FAILED here goes through main-writes' failTicket under the transaction that wraps this
+ * sequence (ADR-0042); the two checks that run before a transaction open one for their single stamp.
+ */
 import { hasCommitsAhead, revParse, worktreeDirty } from "./git.ts";
 import {
   completeTicket,
+  failTicket,
   integrateCurrentMainIntoWorktree,
   stamp,
   tryMerge,
   withMergeLock,
 } from "./main-writes.ts";
-import { runNode } from "./node-entry.ts";
-import { nodeLine, RESOLVE, type SettleResult } from "./node-outcomes.ts";
-import { scanTickets, type Ticket } from "./tickets.ts";
+import { RESOLVE, type SettleResult } from "./node-outcomes.ts";
+import type { Ticket } from "./tickets.ts";
 
 function log(msg: string): void {
   console.error(msg);
-}
-
-/** Stamp FAILED in its own transaction when a node calls it; re-enters the settle transaction. */
-export async function fail(target: string, ticket: Ticket, reason: string): Promise<void> {
-  await withMergeLock(target, async () => {
-    log(`${ticket.id} FAILED: ${reason}`);
-    await stamp(target, ticket, "FAILED");
-  });
 }
 
 async function settleMerge(
@@ -35,11 +30,11 @@ async function settleMerge(
     return "merged";
   }
   if (result === "empty") {
-    await fail(target, ticket, "merge produced no new commit on Main");
+    await failTicket(target, ticket, "merge produced no new commit on Main");
     return "failed";
   }
   if (result === "conflict") return "conflict";
-  await fail(target, ticket, brokenReason);
+  await failTicket(target, ticket, brokenReason);
   return "failed";
 }
 
@@ -58,7 +53,7 @@ async function mergeOntoMain(
     const reason = lastError
       ? `no commits on ticket branch that Main does not have (${lastError})`
       : "no commits on ticket branch that Main does not have";
-    await fail(target, ticket, reason);
+    await failTicket(target, ticket, reason);
     return "failed";
   }
   await stamp(target, ticket, "MERGING");
@@ -72,7 +67,10 @@ export async function settleAfterConflict(
   lastError?: string,
 ): Promise<"merged" | "failed"> {
   if (await worktreeDirty(worktree)) {
-    await fail(target, ticket, "worktree dirty after conflict agent");
+    // One stamp, its own transaction: nothing is held at this point.
+    await withMergeLock(target, () =>
+      failTicket(target, ticket, "worktree dirty after conflict agent"),
+    );
     return "failed";
   }
   // The caller opens the transaction: mergeOntoMain's stamp and merge are one atomic step.
@@ -85,7 +83,7 @@ export async function settleAfterConflict(
       lastError,
     );
     if (second === "conflict") {
-      await fail(target, ticket, "merge still broken after conflict agent");
+      await failTicket(target, ticket, "merge still broken after conflict agent");
       return "failed";
     }
     return second;
@@ -99,7 +97,8 @@ export async function settleAfterAgent(
   lastError?: string,
 ): Promise<SettleResult> {
   if (await worktreeDirty(worktree)) {
-    await fail(target, ticket, "worktree dirty after implement");
+    // One stamp, its own transaction: the settle transaction has not opened yet.
+    await withMergeLock(target, () => failTicket(target, ticket, "worktree dirty after implement"));
     return "failed";
   }
 
@@ -117,7 +116,7 @@ export async function settleAfterAgent(
     await stamp(target, ticket, "CONFLICT");
     const integrated = await integrateCurrentMainIntoWorktree(target, worktree);
     if (integrated === "failed") {
-      await fail(target, ticket, "could not merge Main into Worktree");
+      await failTicket(target, ticket, "could not merge Main into Worktree");
       return "failed";
     }
     if (integrated === "conflict") {
@@ -131,22 +130,9 @@ export async function settleAfterAgent(
       "merge still broken after integrating Main",
     );
     if (rematch === "conflict") {
-      await fail(target, ticket, "merge still broken after integrating Main");
+      await failTicket(target, ticket, "merge still broken after integrating Main");
       return "failed";
     }
     return rematch;
-  });
-}
-
-if (import.meta.main) {
-  await runNode({
-    ticket: true,
-    run: async ({ target, ticketId }) => {
-      const ticket = scanTickets(target).find((t) => t.id === ticketId);
-      if (!ticket) throw new Error(`ticket not found: ${ticketId}`);
-      const worktree = join(target, ticket.worktreeRel);
-      if (!existsSync(worktree)) throw new Error(`worktree missing: ${worktree}`);
-      return nodeLine(await settleAfterAgent(target, ticket, worktree));
-    },
   });
 }

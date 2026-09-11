@@ -134,10 +134,27 @@ try {
     const rel = writeTicket(root, "feat", "01", "demo", "READY", "None");
     commitTickets(root);
     const ticket = ticketOf(root, "feat/01");
-    const result = await beginTicket(root, ticket);
+    const said: string[] = [];
+    const realError = console.error;
+    console.error = (...args: unknown[]) => {
+      said.push(args.map(String).join(" "));
+    };
+    let result;
+    try {
+      result = await beginTicket(root, ticket);
+    } finally {
+      console.error = realError;
+    }
     const wt = join(root, ticket.worktreeRel);
     expectEqual("uv fail Status", statusOf(root, rel), "FAILED");
     expect("uv fail Worktree kept", existsSync(wt), wt);
+    // The env sync is the one FAILED cause that used to print nothing at all: the reason lived in a
+    // BeginResult field no caller read. It is recorded now, at the owner.
+    expect(
+      "uv fail says why",
+      (said[0] ?? "").startsWith("feat/01 FAILED: uv sync --frozen failed:"),
+      said.join(" | "),
+    );
     expectEqual("uv fail stamp", gitC(root, "log", "-1", "--format=%s"), "orchestrator: feat/01 Status FAILED");
     expect("RUNNING then FAILED", gitC(root, "log", "-1", "--format=%s", "HEAD~1").includes("Status RUNNING"));
     expect("result not ok", result.ok === false, result);

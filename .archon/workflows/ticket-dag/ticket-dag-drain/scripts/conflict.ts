@@ -7,8 +7,8 @@ import { syncWorktreeEnv } from "./worktree-env.ts";
 import { loadConfig, type PackConfig } from "./config.ts";
 import { runNode } from "./node-entry.ts";
 import { nodeLine } from "./node-outcomes.ts";
-import { fail, settleAfterConflict } from "./settle.ts";
-import { stamp, withMergeLock } from "./main-writes.ts";
+import { failTicket, stamp, withMergeLock } from "./main-writes.ts";
+import { settleAfterConflict } from "./settle.ts";
 import { scanTickets } from "./tickets.ts";
 
 export async function conflictTicket(
@@ -20,7 +20,8 @@ export async function conflictTicket(
   if (!ticket) throw new Error(`ticket not found: ${ticketId}`);
   const worktree = join(target, ticket.worktreeRel);
   if (!existsSync(worktree)) {
-    await fail(target, ticket, `worktree missing: ${worktree}`);
+    // One FAILED stamp, its own transaction: nothing is held here.
+    await withMergeLock(target, () => failTicket(target, ticket, `worktree missing: ${worktree}`));
     return "failed";
   }
   // RESOLVING is one Main write and the agent run below stays outside the lock, so this is the
@@ -29,7 +30,10 @@ export async function conflictTicket(
   try {
     await syncWorktreeEnv(worktree);
   } catch (e) {
-    await fail(target, ticket, e instanceof Error ? e.message : String(e));
+    // Same as the missing-Worktree path: its own transaction, one stamp.
+    await withMergeLock(target, () =>
+      failTicket(target, ticket, e instanceof Error ? e.message : String(e)),
+    );
     return "failed";
   }
   const config: PackConfig = opts.config ?? loadConfig(target);
@@ -48,7 +52,10 @@ export async function conflictTicket(
     console.error(`${ticket.id} session ${turn.sessionFile}`);
     return settleAfterConflict(target, ticket, worktree, turn.lastError);
   } catch (e) {
-    await fail(target, ticket, e instanceof Error ? e.message : String(e));
+    // The conflict turn threw where an outcome is expected: one FAILED stamp, its own transaction.
+    await withMergeLock(target, () =>
+      failTicket(target, ticket, e instanceof Error ? e.message : String(e)),
+    );
     return "failed";
   }
 }

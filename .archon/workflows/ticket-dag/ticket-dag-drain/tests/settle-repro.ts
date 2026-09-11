@@ -1,10 +1,14 @@
 #!/usr/bin/env bun
-/** Temp-Target repro: settle after agent. Matches empty-merge and merge-conflict CLI repros. No Pi, no Archon engine, no repo src/. */
+/**
+ * Temp-Target repro: settle after agent - the empty-merge, dirty, conflict and merge routes, and the
+ * one place a FAILED reason is recorded. No Pi, no Archon engine, no repo src/.
+ */
 import { existsSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { beginTicket } from "../scripts/begin.ts";
 import {
   ensureGitignoreLine,
+  failTicket,
   integrateCurrentMainIntoWorktree,
   stamp,
   tryMerge,
@@ -23,7 +27,6 @@ import {
   expectReject,
   gitC,
   hasMergeHead,
-  runScript,
   sleep,
   statusOf,
   subjects,
@@ -31,15 +34,6 @@ import {
   withTarget,
   writeTicket,
 } from "./target.ts";
-
-const settleScript = join(import.meta.dir, "../scripts/settle.ts");
-
-function runSettleScript(
-  root: string,
-  ticketId: string,
-): { stdout: string; stderr: string; status: number | null } {
-  return runScript(settleScript, root, { INPUTS_TICKET: ticketId });
-}
 
 try {
   await withTarget(async (root) => {
@@ -180,6 +174,31 @@ try {
     await withMergeLock(root, () => stamp(root, ticket, "RUNNING"));
     expectEqual("stamped Status", statusOf(root, rel), "RUNNING");
     expectEqual("stamp message", gitC(root, "log", "-1", "--format=%s"), "orchestrator: feat/01 Status RUNNING");
+    // The FAILED writer is one more Main writer: it refuses outside a transaction, and inside one it
+    // is the only place the reason is recorded.
+    await expectReject(
+      "unlocked failTicket",
+      () => failTicket(root, ticket, "reason"),
+      /failTicket writes Main and must run inside withMergeLock/,
+    );
+    expectEqual("rejected FAILED wrote no Status", statusOf(root, rel), "RUNNING");
+    const said: string[] = [];
+    const realError = console.error;
+    console.error = (...args: unknown[]) => {
+      said.push(args.map(String).join(" "));
+    };
+    try {
+      await withMergeLock(root, () => failTicket(root, ticket, "one reason"));
+    } finally {
+      console.error = realError;
+    }
+    expectEqual("FAILED Status under the caller's lock", statusOf(root, rel), "FAILED");
+    expectEqual(
+      "and the reason recorded with it",
+      said.find((l) => l.includes("FAILED")),
+      "feat/01 FAILED: one reason",
+    );
+    expectEqual("FAILED message", gitC(root, "log", "-1", "--format=%s"), "orchestrator: feat/01 Status FAILED");
   });
 
   await withTarget(async (root) => {
@@ -210,42 +229,30 @@ try {
   });
 
   await withTarget(async (root) => {
-    writeTicket(root, "feat", "01", "demo", "READY", "None");
-    commitTickets(root);
-    const ticket = ticketOf(root, "feat/01");
-    await beginTicket(root, ticket);
-    const proc = runSettleScript(root, "feat/01");
-    expectEqual("failed stdout token", proc.stdout, "failed\n");
-    expectEqual("git-contract FAILED exit 0", proc.status, 0);
-    expect("logs on stderr not stdout", !proc.stdout.includes("\nfailed") || proc.stdout === "failed\n");
-  });
-
-  await withTarget(async (root) => {
-    writeTicket(root, "feat", "01", "demo", "READY", "None");
+    const rel = writeTicket(root, "feat", "01", "demo", "READY", "None");
     commitTickets(root);
     const ticket = ticketOf(root, "feat/01");
     const begun = await beginTicket(root, ticket);
-    commitFile(begun.worktree, "work.txt", "agent\n", "agent work");
-    const proc = runSettleScript(root, "feat/01");
-    expectEqual("merged stdout token", proc.stdout, "merged\n");
-    expectEqual("merged exit 0", proc.status, 0);
-  });
-
-  await withTarget(async (root) => {
-    writeFileSync(join(root, "f"), "a\n");
-    gitC(root, "add", "f");
-    gitC(root, "commit", "-m", "init f");
-    writeTicket(root, "feat", "01", "demo", "READY", "None");
-    commitTickets(root);
-    const ticket = ticketOf(root, "feat/01");
-    const begun = await beginTicket(root, ticket);
-    commitFile(begun.worktree, "f", "b\n", "ticket");
-    writeFileSync(join(root, "f"), "c\n");
-    gitC(root, "add", "f");
-    gitC(root, "commit", "-m", "mainline");
-    const proc = runSettleScript(root, "feat/01");
-    expectEqual("resolve stdout token", proc.stdout, "resolve\n");
-    expectEqual("resolve exit 0", proc.status, 0);
+    const said: string[] = [];
+    const realError = console.error;
+    console.error = (...args: unknown[]) => {
+      said.push(args.map(String).join(" "));
+    };
+    let result = "";
+    try {
+      result = await settleAfterAgent(root, ticket, begun.worktree);
+    } finally {
+      console.error = realError;
+    }
+    expectEqual("empty branch settles failed", result, "failed");
+    expectEqual("empty branch Status", statusOf(root, rel), "FAILED");
+    // The owner records why: a FAILED used to be silent whenever its cause was not one of the paths
+    // that happened to log, and a `uv sync --frozen` failure printed nothing at all.
+    expectEqual(
+      "the FAILED reason is recorded",
+      said.find((l) => l.includes("FAILED")),
+      "feat/01 FAILED: no commits on ticket branch that Main does not have",
+    );
   });
 
   await withTarget(async (root) => {
