@@ -1,0 +1,9 @@
+# The pack imports nothing outside itself
+
+`config.ts` read the Target's config with `import { parse as parseYaml } from "yaml"`. That worked in this repository and in an Archon run only by accident: the run has no `node_modules`, and the specifier resolved out of Bun's global install cache (`~/.bun/install/cache/yaml@2.9.0@@@1/dist/index.js`) — a cache that can be cleared, on a machine that may never have had it. Every node loads the config, so that accident sat on the path of every node of every run.
+
+The reader is now pack-local (`parseConfigText`) and reads the shape the config actually is: one flat mapping of scalars, with `#` comments, blank lines, quoted values, CRLF, trailing whitespace and a missing final newline tolerated, an empty file meaning the defaults, and the four-key validation with byte-identical messages. It is strict where guessing would be worse than failing: a known key with a nested map, a list, a block scalar or no value throws with the file and the line, because silently reinterpreting it as the string it looks like is how a config becomes a surprise. Unknown keys are ignored, as before.
+
+The rule is the general one: the pack's only remaining third-party specifier is the Pi SDK ladder's bare-name candidate (ADR-0058), which is a candidate with fallbacks rather than a dependency. `config-repro.ts` runs from a copy of the pack with no `node_modules`, and the ladder's own repro does the same.
+
+Rejected: keeping `yaml` and shipping it with the pack (the pack ships no dependencies, and ADR-0037 keeps the modules in the workflow folder); a JSON config (the file has always been YAML by ADR-0034, and Targets have one); one regex per known key (four parsers, and none of them could name a line); tolerating the shapes it does not understand (the surprise above).

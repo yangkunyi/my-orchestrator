@@ -6,6 +6,6 @@ Before this the fact was adapter-local: `prependVenvBin` had exactly one caller,
 
 It is a transform rather than a resolved env so that Pi keeps its spawn context's other keys and dsh keeps its `DSH_*` variables. `prependVenvBin` is gone: one concept, one implementation, two callers.
 
-Known residual: the one call site `spawnHook: piSpawnHook(opts.env)` cannot be read back out of the tool definition the SDK builds, so replacing it with `(ctx) => ctx` is not caught by any test. Everything on either side of it — the seam value, the hook body, the composition — is asserted behaviourally.
+The residual recorded here — `spawnHook: piSpawnHook(opts.env)` could not be read back out of the tool definition the SDK builds, so a `(ctx) => ctx` no-op was caught by no test — is closed by ADR-0060: the session mounts the tool through one factory and a repro drives that definition, asserting the environment a real spawn sees.
 
 Rejected: each adapter composing PATH on its own (the drift this removes); a resolved env value on the seam (every adapter would have to merge its own base back in); the no-op guard living in the adapters rather than in the one function that owns the rule.
