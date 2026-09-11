@@ -1,0 +1,9 @@
+# A node's script resolves in the folder whose YAML declares it
+
+`implement.ts` and `conflict.ts` live in `ticket-dag-execute/scripts/`, the folder whose YAML declares `script: implement` and `script: conflict`. The two nine-line shims that re-exported them from `ticket-dag-drain/scripts/` are deleted, and so are the bodies' copies in the drain folder. `yaml-contract-repro.ts` reads one per-folder index and asserts the invariant in both directions: every entry script in a folder is a node declared in that folder's YAML, and every declared node's script exists there; the folder's name is in the failure message. It used to union the two folders, so a body resolved in the wrong folder was invisible to it — a shim restored in the drain folder and a stray script dropped beside the drain nodes each fail the test now.
+
+The price is real and is recorded here: the bodies import the pack's shared modules across the folder, 20 imports instead of 2, and a lone `ticket-dag-execute` copy still cannot run — it fails on `../../ticket-dag-drain/scripts/agent.ts`, because the modules cannot move (ADR-0037). ADR-0037's rejected list turned this direction down for exactly that reason; this round takes it for the script-name invariant and two fewer files, not for a folder that works alone. That claim is false and was measured to be false.
+
+This amends ADR-0037's description of the shims and ADR-0048's "read across both pack folders": the declared script is the body, the contract test requires the declaring folder, and only the modules' home stays where ADR-0037 put it.
+
+Rejected: keeping the shims (the declared script was not the body); copying the bodies into execute and leaving shims in drain (~120 duplicated lines); collapsing the two folders into one (archon 0.10.1 refuses a pack-level shared folder, ADR-0037); teaching the contract test to prefer the declaring folder while still searching both.

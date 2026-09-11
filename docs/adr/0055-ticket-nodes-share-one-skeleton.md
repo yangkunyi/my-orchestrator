@@ -1,0 +1,11 @@
+# Both ticket nodes run one skeleton, and the last transition edge gets its verb
+
+`ticket-dag-execute/scripts/ticket-node.ts` owns what every ticket node does around its own step: find the Ticket, take the node's step, resolve `config ?? loadConfig` and `runAgent ?? defaultAgent`, build the role's opts through `roles.ts`, run the turn, print the session the runner returned, call the step's settle, and map the throw — a runner that could not start records the reason through `failTicket` and rethrows so the node exits non-zero and the drain stops (ADR-0051), while any other throw is this Ticket's FAILED (ADR-0042, ADR-0049). `implement.ts` and `conflict.ts` declare only their own step: `beginTicket` plus the implement role's skill argument plus `settleAfterAgent`; the Worktree check, `markResolving` and the environment re-sync plus `settleAfterConflict`.
+
+Measured before: 47 and 58 code lines, 29 of them verbatim in both files (34 under a sorted-unique diff) — the ticket lookup, the config/runner pair, the roleAgent call, the session line, the catch policy, and the identical CLI wrapper. After: 25 + 36 in the nodes and 63 in the skeleton, so the card buys one home for the policy, not fewer lines. The policy is the reason: it is three commits old and has been changed twice, and a third ticket node would have been a third copy of it.
+
+`markResolving` took the last ownerless edge: `conflict.ts` stamped RESOLVING in its own one-stamp transaction, which ADR-0054's picture could only describe as another module's. Every edge in that picture now names a verb that owns it, and the conflict node's step calls the verb instead of writing Main.
+
+The skeleton is a library and carries no `import.meta.main` block: every entry script in a workflow folder must be a node declared in that folder's YAML, so a node body is a file the contract test expects to find and a skeleton is not (ADR-0048, ADR-0057).
+
+Rejected: extracting round 3's shared one-ticket-agent-turn helper (rated Speculative then because it counted only the try/catch tail); letting each node keep its own copy of the error policy; a step that returns the settle's inputs instead of a closure over the Worktree it resolved; moving the RESOLVING stamp into a node's catch; giving the skeleton a per-node flag for the implement-only skill argument.
