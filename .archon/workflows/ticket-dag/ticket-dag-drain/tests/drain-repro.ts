@@ -142,6 +142,60 @@ try {
     expect("Worktree kept after unresolved conflict", existsSync(wt));
   });
 
+  // Where a turn's session lives is the runner's to know, not the role table's: the node reports the
+  // path the runner handed back, and it can only report it once the turn has run.
+  await withTarget(async (root, artifacts) => {
+    writeTicket(root, "feat", "01", "demo", "READY", "None");
+    commitTickets(root);
+    const saw: string[] = [];
+    const realError = console.error;
+    console.error = (...args: unknown[]) => {
+      saw.push(args.map(String).join(" "));
+    };
+    try {
+      await implementTicket(root, "feat/01", {
+        artifactsDir: artifacts,
+        runAgent: async () => ({
+          sessionFile: join(artifacts, "elsewhere", "session.v9.jsonl"),
+          answer: { kind: "none" },
+          lastError: undefined,
+        }),
+      });
+    } finally {
+      console.error = realError;
+    }
+    const line = saw.find((l) => l.includes(" session "));
+    expectEqual(
+      "the node reports the runner's session path",
+      line,
+      `feat/01 session ${join(artifacts, "elsewhere", "session.v9.jsonl")}`,
+    );
+  });
+
+  // A turn that never got a session must not be reported as having one: a guessed path that does not
+  // exist is worse than no pointer at all, so the node only says where a session is once it is told.
+  await withTarget(async (root, artifacts) => {
+    writeTicket(root, "feat", "01", "demo", "READY", "None");
+    commitTickets(root);
+    const saw: string[] = [];
+    const realError = console.error;
+    console.error = (...args: unknown[]) => {
+      saw.push(args.map(String).join(" "));
+    };
+    try {
+      await implementTicket(root, "feat/01", {
+        artifactsDir: artifacts,
+        runAgent: async () => {
+          throw new Error("no credentials");
+        },
+      });
+    } finally {
+      console.error = realError;
+    }
+    expectEqual("a turn with no session reports none", saw.find((l) => l.includes(" session ")), undefined);
+    expect("the failure is still recorded", saw.some((l) => l.includes("FAILED: no credentials")), saw.join(" | "));
+  });
+
   console.log(JSON.stringify({ ok: true }));
 } catch (e) {
   console.log(JSON.stringify({ ok: false, error: e instanceof Error ? e.message : String(e) }));

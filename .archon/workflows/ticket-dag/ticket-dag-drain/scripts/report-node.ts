@@ -103,8 +103,8 @@ export async function runReportNode(
     prompt,
     fallback,
   }: ReportAsk<R>): Promise<string> => {
-    const agent = roleAgent({ role, args, cwd: target, artifactsDir: opts.artifactsDir, config, prompt });
-    const r = await runAgent(agent.opts);
+    const agentOpts = roleAgent({ role, args, cwd: target, artifactsDir: opts.artifactsDir, config, prompt });
+    const r = await runAgent(agentOpts);
     // One answer channel: the runner reads its own product and hands the answer over. Its failure
     // report is the reason a turn answered no text; the caller's fallback is the last resort.
     return r.answer.kind === "text" ? r.answer.text : r.lastError ?? fallback;

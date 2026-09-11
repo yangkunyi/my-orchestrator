@@ -1,7 +1,6 @@
 import { AGENT_WALL_MS, type AgentRole, type PackAgentOpts } from "./agent.ts";
 import type { PackConfig, Runner } from "./config.ts";
 import { personaFor, readTddSkill } from "./prompt.ts";
-import { roleSessionFile } from "./session-log.ts";
 
 /** The drain-end readers share one clock: review and summary read the same range and report on it. */
 export const REVIEW_WALL_MS = 30 * 60 * 1000;
@@ -26,6 +25,9 @@ export type RoleShape = {
  * far as it can: Pi mounts the drain-end readers' read-only tool allowlist (pi-session.ts), dsh has
  * one bash tool and no sandbox and can only state the contract (dsh-agent.ts). The seam carries no
  * option for that, because a caller cannot pass one that only one runner honours.
+ *
+ * A role does not know where its session lives either: each runner keeps it where its harness does
+ * and reports the path on PackAgentResult.sessionFile.
  */
 type RoleSpec<A> = {
   sessionKey: (args: A) => string;
@@ -68,33 +70,20 @@ export type RoleCall<R extends AgentRole> = {
   prompt: string;
 };
 
-export type RoleAgent = {
-  opts: PackAgentOpts;
-  /**
-   * Diagnostics: where Pi keeps this role's session - artifacts/sessions/<session key>/<role>.jsonl.
-   * Not the answer channel (PackAgentResult.answer is), and a runner that keeps its sessions
-   * elsewhere reports its own path in PackAgentResult.sessionFile.
-   */
-  sessionFile: string;
-};
-
 /** The agent opts for a node's role, with the config the runner needs folded in. */
-export function roleAgent<R extends AgentRole>(call: RoleCall<R>): RoleAgent {
+export function roleAgent<R extends AgentRole>(call: RoleCall<R>): PackAgentOpts {
   const spec = ROLES[call.role];
   const sessionKey = spec.sessionKey(call.args);
   return {
-    sessionFile: roleSessionFile(call.artifactsDir, sessionKey, call.role),
-    opts: {
-      cwd: call.cwd,
-      artifactsDir: call.artifactsDir,
-      sessionKey,
-      role: call.role,
-      model: call.config.model,
-      thinkingLevel: call.config.thinkingLevel,
-      runner: call.config.runner,
-      persona: spec.persona(call.config.runner, call.args),
-      prompt: call.prompt,
-      wallMs: spec.wallMs,
-    },
+    cwd: call.cwd,
+    artifactsDir: call.artifactsDir,
+    sessionKey,
+    role: call.role,
+    model: call.config.model,
+    thinkingLevel: call.config.thinkingLevel,
+    runner: call.config.runner,
+    persona: spec.persona(call.config.runner, call.args),
+    prompt: call.prompt,
+    wallMs: spec.wallMs,
   };
 }

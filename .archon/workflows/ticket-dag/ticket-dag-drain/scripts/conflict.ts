@@ -34,7 +34,7 @@ export async function conflictTicket(
   }
   const config: PackConfig = opts.config ?? loadConfig(target);
   const runAgent: AgentRunner = opts.runAgent ?? defaultAgent;
-  const agent = roleAgent({
+  const agentOpts = roleAgent({
     role: "conflict",
     args: { ticketId: ticket.id },
     cwd: worktree,
@@ -42,10 +42,11 @@ export async function conflictTicket(
     config,
     prompt: conflictTask(ticket.relPath),
   });
-  console.error(`${ticket.id} session ${agent.sessionFile}`);
   try {
-    const pi = await runAgent(agent.opts);
-    return settleAfterConflict(target, ticket, worktree, pi.lastError);
+    const turn = await runAgent(agentOpts);
+    // Same as the implement node: the runner reports where its session lives, the node says so.
+    console.error(`${ticket.id} session ${turn.sessionFile}`);
+    return settleAfterConflict(target, ticket, worktree, turn.lastError);
   } catch (e) {
     await fail(target, ticket, e instanceof Error ? e.message : String(e));
     return "failed";

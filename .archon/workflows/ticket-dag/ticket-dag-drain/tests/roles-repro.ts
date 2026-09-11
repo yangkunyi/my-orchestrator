@@ -34,16 +34,18 @@ try {
     config: CONFIG,
     prompt: TASK,
   });
-  expectEqual("implement session key is the Ticket", impl.opts.sessionKey, "feat/01");
-  expectEqual("implement session file", impl.sessionFile, join(ARTIFACTS, "sessions", "feat/01", "implement.jsonl"));
-  expectEqual("implement role", impl.opts.role, "implement");
-  expectEqual("implement cwd", impl.opts.cwd, CWD);
-  expectEqual("implement model from config", impl.opts.model, CONFIG.model);
-  expectEqual("implement thinkingLevel from config", impl.opts.thinkingLevel, CONFIG.thinkingLevel);
-  expectEqual("implement runner from config", impl.opts.runner, CONFIG.runner);
-  expectEqual("implement prompt is the node's", impl.opts.prompt, TASK);
+  expectEqual("implement session key is the Ticket", impl.sessionKey, "feat/01");
+  // The table no longer answers where a session lives: only the runner that opened it knows, and it
+  // reports the path on PackAgentResult.sessionFile - dsh's log is under DSH_HOME, not this formula.
+  expect("the table does not answer where a session lives", !("sessionFile" in impl));
+  expectEqual("implement role", impl.role, "implement");
+  expectEqual("implement cwd", impl.cwd, CWD);
+  expectEqual("implement model from config", impl.model, CONFIG.model);
+  expectEqual("implement thinkingLevel from config", impl.thinkingLevel, CONFIG.thinkingLevel);
+  expectEqual("implement runner from config", impl.runner, CONFIG.runner);
+  expectEqual("implement prompt is the node's", impl.prompt, TASK);
   // The seam carries only what both runners honour: no option here is one an adapter would drop.
-  expectEqual("the role table's opts are the seam's whole vocabulary", Object.keys(impl.opts).sort(), [
+  expectEqual("the role table's opts are the seam's whole vocabulary", Object.keys(impl).sort(), [
     "artifactsDir",
     "cwd",
     "model",
@@ -55,8 +57,8 @@ try {
     "thinkingLevel",
     "wallMs",
   ]);
-  expectEqual("implement wall clock is the ticket clock", impl.opts.wallMs, AGENT_WALL_MS);
-  expectEqual("implement persona is the skill", impl.opts.persona, personaFor("implement", "pi", { skill: undefined }));
+  expectEqual("implement wall clock is the ticket clock", impl.wallMs, AGENT_WALL_MS);
+  expectEqual("implement persona is the skill", impl.persona, personaFor("implement", "pi", { skill: undefined }));
 
   const dshImplement = roleAgent({
     role: "implement",
@@ -71,14 +73,14 @@ try {
   const tree = readTddSkill();
   expect(
     "the table's dsh persona is the tree's, not the inlined fallback",
-    tree === undefined || (dshImplement.opts.persona ?? "").includes("The tdd skill, in full, from "),
+    tree === undefined || (dshImplement.persona ?? "").includes("The tdd skill, in full, from "),
   );
   expectEqual(
     "the runner reaches the persona",
-    dshImplement.opts.persona,
+    dshImplement.persona,
     personaFor("implement", "dsh", { skill: readTddSkill() }),
   );
-  expect("dsh implement persona carries the tdd body", (dshImplement.opts.persona ?? "").includes("Red before green."));
+  expect("dsh implement persona carries the tdd body", (dshImplement.persona ?? "").includes("Red before green."));
 
   const conflict = roleAgent({
     role: "conflict",
@@ -88,10 +90,9 @@ try {
     config: CONFIG,
     prompt: TASK,
   });
-  expectEqual("conflict session key is the Ticket", conflict.opts.sessionKey, "feat/02");
-  expectEqual("conflict session file", conflict.sessionFile, join(ARTIFACTS, "sessions", "feat/02", "conflict.jsonl"));
-  expectEqual("conflict persona is the skill", conflict.opts.persona, personaFor("conflict", "pi"));
-  expectEqual("conflict wall clock is the ticket clock", conflict.opts.wallMs, AGENT_WALL_MS);
+  expectEqual("conflict session key is the Ticket", conflict.sessionKey, "feat/02");
+  expectEqual("conflict persona is the skill", conflict.persona, personaFor("conflict", "pi"));
+  expectEqual("conflict wall clock is the ticket clock", conflict.wallMs, AGENT_WALL_MS);
 
   // A review axis is not a Ticket: its session is keyed by the axis, and its persona by the range.
   const review = roleAgent({
@@ -102,13 +103,12 @@ try {
     config: CONFIG,
     prompt: TASK,
   });
-  expectEqual("a review axis keys its own session", review.opts.sessionKey, "drain-review-2");
-  expectEqual("review session file", review.sessionFile, join(ARTIFACTS, "sessions", "drain-review-2", "review.jsonl"));
+  expectEqual("a review axis keys its own session", review.sessionKey, "drain-review-2");
   // The read-only intent is not an option the table hands down: it is part of the persona every
   // runner gets, and Pi backs it with its own allowlist (agent-repro.ts asserts that mapping).
-  expect("review states its read-only contract", review.opts.persona.includes("read-only"));
-  expect("review wall clock", review.opts.wallMs, REVIEW_WALL_MS);
-  expectEqual("review persona is built from the range", review.opts.persona, reviewPersona("abc", REVIEW_AXES[1]));
+  expect("review states its read-only contract", review.persona.includes("read-only"));
+  expect("review wall clock", review.wallMs, REVIEW_WALL_MS);
+  expectEqual("review persona is built from the range", review.persona, reviewPersona("abc", REVIEW_AXES[1]));
 
   const summary = roleAgent({
     role: "summary",
@@ -118,10 +118,9 @@ try {
     config: CONFIG,
     prompt: TASK,
   });
-  expectEqual("summary session key is the node's own name", summary.opts.sessionKey, "drain-summary");
-  expectEqual("summary session file", summary.sessionFile, join(ARTIFACTS, "sessions", "drain-summary", "summary.jsonl"));
-  expectEqual("summary wall clock", summary.opts.wallMs, REVIEW_WALL_MS);
-  expectEqual("summary persona merges the reviews", summary.opts.persona, summaryPersona("abc"));
+  expectEqual("summary session key is the node's own name", summary.sessionKey, "drain-summary");
+  expectEqual("summary wall clock", summary.wallMs, REVIEW_WALL_MS);
+  expectEqual("summary persona merges the reviews", summary.persona, summaryPersona("abc"));
 
   // Every role goes through the same persona dispatch, so no caller re-spells a role's contract.
   expectEqual(

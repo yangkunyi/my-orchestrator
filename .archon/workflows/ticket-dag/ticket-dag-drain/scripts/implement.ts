@@ -21,7 +21,7 @@ export async function implementTicket(
   if (begun.outcome !== "ready") return begun.outcome;
   const config: PackConfig = opts.config ?? loadConfig(target);
   const runAgent: AgentRunner = opts.runAgent ?? defaultAgent;
-  const agent = roleAgent({
+  const agentOpts = roleAgent({
     role: "implement",
     args: { ticketId: ticket.id },
     cwd: begun.worktree,
@@ -29,10 +29,12 @@ export async function implementTicket(
     config,
     prompt: implementTask(ticket.relPath),
   });
-  console.error(`${ticket.id} session ${agent.sessionFile}`);
   try {
-    const pi = await runAgent(agent.opts);
-    return settleAfterAgent(target, ticket, begun.worktree, pi.lastError);
+    const turn = await runAgent(agentOpts);
+    // Where a turn's session lives is the runner's to know: dsh names its log only once it has run, so
+    // the node reports the path that came back rather than a formula of its own.
+    console.error(`${ticket.id} session ${turn.sessionFile}`);
+    return settleAfterAgent(target, ticket, begun.worktree, turn.lastError);
   } catch (e) {
     await fail(target, ticket, e instanceof Error ? e.message : String(e));
     return "failed";
