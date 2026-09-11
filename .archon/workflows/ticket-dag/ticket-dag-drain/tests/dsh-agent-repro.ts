@@ -6,6 +6,7 @@
 import { chmodSync, existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import type { ThinkingLevel } from "../scripts/config.ts";
+import type { PackAgentOpts } from "../scripts/agent.ts";
 import { dshAgent } from "../scripts/dsh-agent.ts";
 import { DshRuntime } from "../scripts/dsh-runtime.ts";
 import { implementTask, personaFor, readTddSkill, REVIEW_AXES, reviewPersona, reviewTask } from "../scripts/prompt.ts";
@@ -205,20 +206,18 @@ try {
     expectEqual(`thinkingLevel ${level} maps to effort ${effort}`, mapped.initialize.reasoningEffort, effort);
   }
 
-  await expectReject(
-    "a persona is required",
-    () =>
-      dshAgent({
-        cwd: work,
-        artifactsDir: work,
-        sessionKey: "feat/01",
-        role: "implement",
-        model: undefined,
-        thinkingLevel: "high",
-        prompt: "do it",
-      }),
-    /needs opts.persona/,
-  );
+  // The guard is for callers the type cannot reach (plain JS, a config-driven dispatch), so the opts
+  // are built without the field on purpose and passed through one narrow cast. The cast is the test.
+  const withoutPersona = {
+    cwd: work,
+    artifactsDir: work,
+    sessionKey: "feat/01",
+    role: "implement",
+    model: undefined,
+    thinkingLevel: "high",
+    prompt: "do it",
+  } as unknown as PackAgentOpts;
+  await expectReject("a persona is required", () => dshAgent(withoutPersona), /needs opts.persona/);
 
   delete process.env.DEEPSEEK_BASE_URL;
   delete process.env.DEEPSEEK_API_KEY;

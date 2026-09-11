@@ -1,0 +1,23 @@
+// Typecheck gate for the ticket-dag Archon pack. Dev-only: it lives in the repository, not in the pack
+// folder, because the pack is copied to ~/.archon/workflows/ and must carry nothing the runtime cannot use.
+//
+// Run from the repository root:
+//   node_modules/.bin/tsc -p tsconfig.pack.json
+//
+// The pack's other gate is the repro scripts (bun tests/*.ts in the drain folder); this one checks the
+// interfaces those scripts happen to exercise, which is how a stale caller stays visible.
+{
+  "compilerOptions": {
+    "target": "ES2022",
+    "module": "ESNext",
+    "moduleResolution": "bundler",
+    "strict": true,
+    "noUncheckedIndexedAccess": true,
+    "noEmit": true,
+    "skipLibCheck": true,
+    "allowImportingTsExtensions": true,
+    "lib": ["ES2022"],
+    "types": []
+  },
+  "include": [".archon/workflows/ticket-dag/**/*.ts", "pack-globals.d.ts"]
+}

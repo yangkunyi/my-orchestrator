@@ -39,6 +39,7 @@ export async function runPackPi(opts: PackAgentOpts): Promise<PackAgentResult> {
     createAgentSession,
     createBashToolDefinition,
     DefaultResourceLoader,
+    defineTool,
     getAgentDir,
     ModelRuntime,
     resolveCliModel,
@@ -80,13 +81,19 @@ export async function runPackPi(opts: PackAgentOpts): Promise<PackAgentResult> {
     sessionManager,
     resourceLoader,
     ...(tools ? { tools } : {}),
+    // defineTool is the SDK's own wrapper for this array: customTools is typed ToolDefinition[], so
+    // contextual typing widens the bash tool's params to unknown, which a concrete definition is not
+    // assignable to (strictFunctionTypes, on its render callback). Without the wrapper the pack does
+    // not typecheck - see tsconfig.pack.json.
     customTools: [
-      createBashToolDefinition(opts.cwd, {
-        spawnHook: (ctx) => ({
-          ...ctx,
-          env: { ...ctx.env, PATH: prependVenvBin(ctx.env.PATH, opts.cwd) },
+      defineTool(
+        createBashToolDefinition(opts.cwd, {
+          spawnHook: (ctx) => ({
+            ...ctx,
+            env: { ...ctx.env, PATH: prependVenvBin(ctx.env.PATH, opts.cwd) },
+          }),
         }),
-      }),
+      ),
     ],
   });
 
