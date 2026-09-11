@@ -8,8 +8,6 @@ import { implementTask, readTddSkill } from "../../ticket-dag-drain/scripts/prom
 import { beginTicket, settleAfterAgent } from "../../ticket-dag-drain/scripts/transitions.ts";
 import { runTicketNode, ticketNodeCli, type TicketNode } from "./ticket-node.ts";
 
-export type { TicketAgentOpts };
-
 /**
  * The implement node's own step: begin the Ticket, then hand the turn its Worktree, the implement
  * role's arguments (the Ticket and the tdd skill the machine has) and the settle that merges the
@@ -41,7 +39,7 @@ export async function implementTicket(
   return runTicketNode(IMPLEMENT_NODE, target, ticketId, opts);
 }
 
-export const runImplementCli = ticketNodeCli(IMPLEMENT_NODE);
+const runImplementCli = ticketNodeCli(IMPLEMENT_NODE);
 
 if (import.meta.main) {
   await runImplementCli();

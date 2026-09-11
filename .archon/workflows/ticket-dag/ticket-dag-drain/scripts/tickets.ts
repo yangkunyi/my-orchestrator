@@ -77,11 +77,11 @@ export function isStartable(status: Status): boolean {
   return statusClass(status) === "startable";
 }
 
-export function isInFlight(status: Status): boolean {
+function isInFlight(status: Status): boolean {
   return statusClass(status) === "in-flight";
 }
 
-export function isMerged(status: Status): boolean {
+function isMerged(status: Status): boolean {
   return statusClass(status) === "merged";
 }
 

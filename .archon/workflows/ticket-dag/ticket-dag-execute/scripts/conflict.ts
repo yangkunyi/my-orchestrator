@@ -53,7 +53,7 @@ export async function conflictTicket(
   return runTicketNode(CONFLICT_NODE, target, ticketId, opts);
 }
 
-export const runConflictCli = ticketNodeCli(CONFLICT_NODE);
+const runConflictCli = ticketNodeCli(CONFLICT_NODE);
 
 if (import.meta.main) {
   await runConflictCli();

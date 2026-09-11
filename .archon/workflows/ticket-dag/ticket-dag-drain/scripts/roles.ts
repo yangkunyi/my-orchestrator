@@ -64,7 +64,7 @@ export const ROLES: { [K in AgentRole]: RoleSpec<RoleShape[K]> } = {
 };
 
 /** One node's call: which role, the role's own arguments, where it runs, and what it is asked to do. */
-export type RoleCall<R extends AgentRole> = {
+type RoleCall<R extends AgentRole> = {
   role: R;
   args: RoleShape[R];
   cwd: string;

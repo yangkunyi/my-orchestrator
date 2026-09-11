@@ -1,14 +1,14 @@
 import { spawnSync } from "node:child_process";
 import { loadConfig, type PackConfig } from "./config.ts";
 
-export type NodeEnv = {
+type NodeEnv = {
   target: string;
   ticketId: string;
   artifactsDir: string;
   config: PackConfig;
 };
 
-export type NodeOpts = {
+type NodeOpts = {
   /** Require INPUTS_TICKET. */
   ticket?: boolean;
   /** Require ARTIFACTS_DIR. */

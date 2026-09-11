@@ -19,7 +19,7 @@ import { readReviewBase, writeArtifact } from "./review-artifacts.ts";
 import { roleAgent, type RoleShape } from "./roles.ts";
 
 /** One agent a node asks for: the role and its own arguments, the message, and the empty-answer text. */
-export type ReportAsk<R extends AgentRole> = {
+type ReportAsk<R extends AgentRole> = {
   role: R;
   args: RoleShape[R];
   prompt: string;
@@ -28,7 +28,7 @@ export type ReportAsk<R extends AgentRole> = {
 };
 
 /** What a node's report step is handed once the range is readable. */
-export type ReportRange = {
+type ReportRange = {
   target: string;
   artifactsDir: string;
   config: PackConfig;
@@ -47,13 +47,13 @@ export type ReportRange = {
 };
 
 /** What a node's own read gets: where it runs, and the base it reports on. */
-export type ReportInput = Pick<ReportRange, "target" | "artifactsDir" | "base">;
+type ReportInput = Pick<ReportRange, "target" | "artifactsDir" | "base">;
 
 /**
  * What a node's own read answers: the line to write and stop with (a skip or the node's own range
  * error, and no agent is spent), or the step that produces the artifact.
  */
-export type ReportPrep = { stop: string } | { report: (range: ReportRange) => Promise<string> };
+type ReportPrep = { stop: string } | { report: (range: ReportRange) => Promise<string> };
 
 /**
  * One drain-end report node: the artifact it writes, how its failure line reads, and its own read of

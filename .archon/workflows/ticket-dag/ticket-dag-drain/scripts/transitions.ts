@@ -51,7 +51,7 @@ import {
 } from "./tickets.ts";
 import { ensureVenvIgnored, ensureWorktreesIgnored, syncWorktreeEnv } from "./worktree-env.ts";
 
-export type BeginResult = {
+type BeginResult = {
   worktree: string;
   outcome: BeginOutcome;
   ok: boolean;

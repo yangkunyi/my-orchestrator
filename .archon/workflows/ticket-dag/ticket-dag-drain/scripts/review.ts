@@ -53,7 +53,7 @@ export async function reviewDrain(target: string, opts: TicketAgentOpts): Promis
   await runReportNode(REVIEW_NODE, target, opts);
 }
 
-export const runReviewCli = reportNodeCli(REVIEW_NODE);
+const runReviewCli = reportNodeCli(REVIEW_NODE);
 
 if (import.meta.main) {
   await runReviewCli();

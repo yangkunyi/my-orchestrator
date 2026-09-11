@@ -55,7 +55,7 @@ export function writeArtifact(file: string, body: string): void {
 }
 
 /** review-base read back: the SHA, or the skip line the node writes instead of reviewing. */
-export type ReviewBaseRead = { base: string } | { skip: string };
+type ReviewBaseRead = { base: string } | { skip: string };
 
 /** The base both drain-end nodes need, so the artifact's shape (one SHA) is read in one place. */
 export function readReviewBase(artifactsDir: string): ReviewBaseRead {

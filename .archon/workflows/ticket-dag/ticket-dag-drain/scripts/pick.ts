@@ -5,7 +5,7 @@ import { nodeLine } from "./node-outcomes.ts";
 import { blockersMerged, byId, isStartable, scanTickets, type Ticket } from "./tickets.ts";
 import { openUnblocked } from "./transitions.ts";
 
-export type PickOpts = {
+type PickOpts = {
   concurrency: number;
   artifactsDir: string;
 };

@@ -99,7 +99,7 @@ export function readTddSkill(dir: string = TDD_DIR): TddSkill | undefined {
  * its session prompt advertises the skill catalog and its read tool opens the file. The inlined
  * TDD_SKILL is the fallback when there is no skill, or its body is empty after filtering.
  */
-export function tddPersona(skill: TddSkill | undefined): string {
+function tddPersona(skill: TddSkill | undefined): string {
   if (skill === undefined) return TDD_SKILL;
   const body = skill.body
     .replace(/^---\n[\s\S]*?\n---\n/, "")
@@ -138,7 +138,7 @@ export const REVIEW_AXES = [
  * One axis as the fan-out and review.md spell it: where it sits, and the text that names it. The
  * session key and section number read `index` 1-based; the persona reads `title`.
  */
-export type ReviewAxis = { index: number; title: string };
+type ReviewAxis = { index: number; title: string };
 
 /**
  * The axes with their identity, in report order - the one owner the fan-out, the section headings and

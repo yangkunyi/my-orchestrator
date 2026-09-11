@@ -30,7 +30,7 @@ import { roleAgent, type RoleShape } from "../../ticket-dag-drain/scripts/roles.
 import { scanTickets, type Ticket } from "../../ticket-dag-drain/scripts/tickets.ts";
 
 /** The roles a ticket node runs: each is one node that takes a Ticket id and drives one turn. */
-export type TicketRole = "implement" | "conflict";
+type TicketRole = "implement" | "conflict";
 
 /**
  * What a node's own step leaves behind: an outcome to stop at, with no agent spent (implement's begin
@@ -38,7 +38,7 @@ export type TicketRole = "implement" | "conflict";
  * shape of the turn and what settles it afterwards. The `settle` closure holds the Worktree the node
  * resolved, so the skeleton never guesses where a turn ran.
  */
-export type TicketTurn<R extends TicketRole> =
+type TicketTurn<R extends TicketRole> =
   | { stop: SettleResult }
   | {
       cwd: string;

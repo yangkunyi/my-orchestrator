@@ -44,7 +44,7 @@ function answerText(content: unknown): string | undefined {
   return joined.length > 0 ? joined : undefined;
 }
 
-export type DshRuntimeOpts = {
+type DshRuntimeOpts = {
   cwd: string;
   env: NodeJS.ProcessEnv;
   /** Everything after the dsh binary: the caller picks the harness tree, e.g. ["--profile", "sdk-minimal"]. */

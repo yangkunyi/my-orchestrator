@@ -1,7 +1,7 @@
 import { existsSync, readFileSync } from "node:fs";
 import { isAbsolute, resolve } from "node:path";
 
-export const THINKING_LEVELS = [
+const THINKING_LEVELS = [
   "off",
   "minimal",
   "low",
@@ -180,7 +180,7 @@ export function parseConfigText(text: string, file: string): PackConfig {
   return config;
 }
 
-export function resolveConfigPath(target: string, configPath?: string): string {
+function resolveConfigPath(target: string, configPath?: string): string {
   const raw = configPath?.trim() ? configPath.trim() : DEFAULT_CONFIG_REL;
   return isAbsolute(raw) ? raw : resolve(target, raw);
 }

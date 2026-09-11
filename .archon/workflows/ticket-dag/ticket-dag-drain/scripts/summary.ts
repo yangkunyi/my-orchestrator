@@ -41,7 +41,7 @@ export async function summarizeDrain(target: string, opts: TicketAgentOpts): Pro
   await runReportNode(SUMMARY_NODE, target, opts);
 }
 
-export const runSummaryCli = reportNodeCli(SUMMARY_NODE);
+const runSummaryCli = reportNodeCli(SUMMARY_NODE);
 
 if (import.meta.main) {
   await runSummaryCli();

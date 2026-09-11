@@ -150,7 +150,7 @@ const bunGlobals = globalThis as {
  * the point of the ladder: "no pi on PATH" and "an executable with no global install" are cases a test
  * has to be able to name.
  */
-export type PiSdkLookup = {
+type PiSdkLookup = {
   env: NodeJS.ProcessEnv;
   execPath: string;
   whichPi: () => string | null;
@@ -169,7 +169,7 @@ function lookupFrom(overrides: Partial<PiSdkLookup> = {}): PiSdkLookup {
  * itself. Bun resolves it through the package's own manifest, so this never spells an entry path the
  * package could move; a location with no manifest is handed to the import to report.
  */
-export function piSdkEntry(path: string): string {
+function piSdkEntry(path: string): string {
   const abs = resolve(path);
   try {
     return bunGlobals.Bun?.resolveSync?.(abs, dirname(abs)) ?? abs;
