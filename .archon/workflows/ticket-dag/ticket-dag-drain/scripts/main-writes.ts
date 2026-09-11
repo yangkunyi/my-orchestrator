@@ -161,7 +161,7 @@ export async function tryMerge(
 }
 
 /** Merge Main into the Ticket Worktree, leaving the conflict in the tree for the Conflict Agent. */
-export async function integrateMainIntoWorktree(
+async function integrateMainIntoWorktree(
   worktree: string,
   mainRef: string,
 ): Promise<"ok" | "conflict" | "failed"> {
