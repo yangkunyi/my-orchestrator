@@ -37,7 +37,12 @@ nodes:
             # launches the batch the pool can take, not everything that is startable.
             items: "$pick.output"
             as: ticket
-            join: all_done
+            # all_success, deliberately: a Ticket's own outcome is exit 0 (the Git contract: FAILED,
+            # merged and resolve are all results), so an instance only fails when a node THREW - a runner
+            # that cannot start, or a pack bug. Under all_done that is just an archon_failed marker in this
+            # node's output and the run still reports success, which is how a misconfigured runner used to
+            # drain the whole backlog; under all_success the group fails immediately instead.
+            join: all_success
   - id: review
     script: review
     runtime: bun

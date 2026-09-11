@@ -33,6 +33,7 @@ type YamlNode = {
   withKeys: { key: string; value: string }[];
   dependsOn: string[];
   fanOutAs?: string;
+  fanOutJoin?: string;
   /** Every `$<name>.output` this node's own keys read. */
   reads: string[];
 };
@@ -94,6 +95,7 @@ function scanNodes(yaml: string): YamlNode[] {
       if (indent > blockIndent) {
         if (block === "with" && value) node.withKeys.push({ key, value });
         if (block === "fan_out" && key === "as" && value) node.fanOutAs = value;
+        if (block === "fan_out" && key === "join" && value) node.fanOutJoin = value;
         continue;
       }
       block = undefined;
@@ -202,6 +204,11 @@ try {
       if (node.include) {
         const included = join(dir, "..", node.include, `${node.include}.yaml`);
         expect(`${file}: include ${node.include} is a workflow folder`, existsSync(included));
+        // all_success is load-bearing, not a default: a Ticket's own outcome is exit 0, so an instance
+        // only fails when a node THREW - a runner that cannot start, or a pack bug. Under all_done that
+        // is an archon_failed marker and the run still reports success, which is how a misconfigured
+        // runner used to drain the backlog. Measured with a two-instance probe (ADR-0051).
+        expectEqual(`${file}: ${node.id} fails the node when an instance fails`, node.fanOutJoin, "all_success");
         if (existsSync(included) && node.fanOutAs) {
           const required = requiredInputs(readFileSync(included, "utf8"));
           expect(
