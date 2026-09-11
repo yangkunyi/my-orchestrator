@@ -1,7 +1,7 @@
 import { existsSync, readFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
-import { STATUSES } from "./ticket-line.ts";
+import { STATUSES } from "./tickets.ts";
 import type { Runner } from "./config.ts";
 
 /** The Status vocabulary as the prompts spell it. */

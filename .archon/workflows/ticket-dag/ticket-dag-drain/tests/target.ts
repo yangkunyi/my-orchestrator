@@ -7,7 +7,7 @@ import { dirname, join } from "node:path";
 import { type AgentRunner, type PackAgentOpts } from "../scripts/agent.ts";
 import { isLockHeld, completeTicket, integrateCurrentMainIntoWorktree, tryMerge, withMergeLock } from "../scripts/main-writes.ts";
 import { roleSessionFile } from "../scripts/pi-session.ts";
-import { parseStatus, type Status } from "../scripts/ticket-line.ts";
+import { parseStatus, type Status } from "../scripts/tickets.ts";
 import { scanTickets, type Ticket } from "../scripts/tickets.ts";
 
 export function mkTemp(prefix = "pack-"): string {

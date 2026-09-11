@@ -2,10 +2,10 @@
 /** Repro: scripts/node-outcomes.ts owns the tokens the two YAMLs compare, and pick throttles at config.concurrency. No Pi, no Archon engine, no repo src/. */
 import { readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { beginTicket } from "../scripts/begin.ts";
+import { beginTicket } from "../scripts/transitions.ts";
 import { runNode } from "../scripts/node-entry.ts";
 import { EMPTY_PICK, nodeLine, RESOLVE } from "../scripts/node-outcomes.ts";
-import { settleAfterAgent } from "../scripts/settle.ts";
+import { settleAfterAgent } from "../scripts/transitions.ts";
 import { scanTickets } from "../scripts/tickets.ts";
 import {
   commitFile,

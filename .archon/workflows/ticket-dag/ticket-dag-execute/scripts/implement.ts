@@ -2,14 +2,14 @@
 // in ticket-dag-drain/scripts/, where the pack keeps them: the deployed archon refuses a pack-level
 // `.shared/` folder, and its loader never validates imports (ADR-0037).
 import { defaultAgent, RunnerUnavailable, type AgentRunner, type TicketAgentOpts } from "../../ticket-dag-drain/scripts/agent.ts";
-import { beginTicket } from "../../ticket-dag-drain/scripts/begin.ts";
+import { beginTicket } from "../../ticket-dag-drain/scripts/transitions.ts";
 import { loadConfig, type PackConfig } from "../../ticket-dag-drain/scripts/config.ts";
 import { failTicket, withMergeLock } from "../../ticket-dag-drain/scripts/main-writes.ts";
 import { runNode } from "../../ticket-dag-drain/scripts/node-entry.ts";
 import { nodeLine, type SettleResult } from "../../ticket-dag-drain/scripts/node-outcomes.ts";
 import { implementTask, readTddSkill } from "../../ticket-dag-drain/scripts/prompt.ts";
 import { roleAgent } from "../../ticket-dag-drain/scripts/roles.ts";
-import { settleAfterAgent } from "../../ticket-dag-drain/scripts/settle.ts";
+import { settleAfterAgent } from "../../ticket-dag-drain/scripts/transitions.ts";
 import { scanTickets } from "../../ticket-dag-drain/scripts/tickets.ts";
 
 export type { TicketAgentOpts };

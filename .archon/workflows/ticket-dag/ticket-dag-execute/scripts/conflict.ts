@@ -11,7 +11,7 @@ import { loadConfig, type PackConfig } from "../../ticket-dag-drain/scripts/conf
 import { runNode } from "../../ticket-dag-drain/scripts/node-entry.ts";
 import { nodeLine } from "../../ticket-dag-drain/scripts/node-outcomes.ts";
 import { failTicket, stamp, withMergeLock } from "../../ticket-dag-drain/scripts/main-writes.ts";
-import { settleAfterConflict } from "../../ticket-dag-drain/scripts/settle.ts";
+import { settleAfterConflict } from "../../ticket-dag-drain/scripts/transitions.ts";
 import { scanTickets } from "../../ticket-dag-drain/scripts/tickets.ts";
 
 export async function conflictTicket(
