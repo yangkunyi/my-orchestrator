@@ -63,6 +63,34 @@ try {
     expectEqual("a session with no text answers none", packAnswer(readPiSession(errorFile).text), {
       kind: "none",
     });
+    // The answer channel's rule: a part is text only when its own type says so, and blank is no answer.
+    const thinkingFile = join(artifacts, "sessions", "feat", "01", "thinking.jsonl");
+    writeFileSync(
+      thinkingFile,
+      `${JSON.stringify({
+        type: "message",
+        message: {
+          role: "assistant",
+          content: [
+            { type: "thinking", text: "THINKING-LEAK" },
+            { type: "text", text: "the answer" },
+          ],
+        },
+      })}\n`,
+    );
+    expectEqual("a thinking part is not the answer", readPiSession(thinkingFile).text, "the answer");
+    const thinkingOnly = join(artifacts, "sessions", "feat", "01", "thinking-only.jsonl");
+    writeFileSync(
+      thinkingOnly,
+      `${JSON.stringify({
+        type: "message",
+        message: { role: "assistant", content: [{ type: "thinking", text: "THINKING-LEAK" }] },
+      })}\n`,
+    );
+    expectEqual("a turn that only thought answers no text", readPiSession(thinkingOnly).text, undefined);
+    expectEqual("blank text is no answer", packAnswer(""), { kind: "none" });
+    expectEqual("whitespace is no answer", packAnswer("  \n"), { kind: "none" });
+    expectEqual("a real answer keeps its bytes", packAnswer(" x \n"), { kind: "text", text: " x \n" });
     expectEqual("a missing session reads as absence, not a throw", readPiSession(join(artifacts, "missing.jsonl")), {
       text: undefined,
       error: undefined,

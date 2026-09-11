@@ -54,9 +54,13 @@ export type PackAgentResult = {
   lastError: string | undefined;
 };
 
-/** One turn's answer from the text a runner read out of its own product. */
+/**
+ * One turn's answer from the text a runner read out of its own product. Blank text is no answer: a
+ * node must fall through to its own lastError/fallback rather than write an empty report section.
+ * The text itself is passed through byte for byte.
+ */
 export function packAnswer(text: string | undefined): PackAnswer {
-  return text === undefined ? { kind: "none" } : { kind: "text", text };
+  return text !== undefined && text.trim().length > 0 ? { kind: "text", text } : { kind: "none" };
 }
 
 export type AgentRunner = (opts: PackAgentOpts) => Promise<PackAgentResult>;

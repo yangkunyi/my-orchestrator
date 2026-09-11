@@ -13,13 +13,19 @@ export function roleSessionFile(artifactsDir: string, sessionKey: string, role: 
   return join(artifactsDir, "sessions", sessionKey, `${role}.jsonl`);
 }
 
+/**
+ * A part counts only when its own type is "text": a text key alone is not evidence. dsh's reasoning
+ * parts do carry one (that is how thinking once leaked into a report), and this reader must apply the
+ * same rule as dsh's answerText even though Pi's own parts happen to obey it - measured over 344 real
+ * Pi session files, every part carrying a text key had type "text".
+ */
 function contentText(content: unknown): string | undefined {
   if (typeof content === "string" && content.trim()) return content;
   if (!Array.isArray(content)) return undefined;
   const parts: string[] = [];
   for (const part of content) {
     if (typeof part === "string") parts.push(part);
-    else if (part && typeof part === "object" && "text" in part) {
+    else if (part && typeof part === "object" && (part as { type?: unknown }).type === "text") {
       const text = (part as { text: unknown }).text;
       if (typeof text === "string" && text) parts.push(text);
     }
