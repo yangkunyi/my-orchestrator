@@ -186,13 +186,25 @@ try {
   expectEqual("summary wall clock", summary.wallMs, REVIEW_WALL_MS);
   expectEqual("summary persona merges the reviews", summary.persona, summaryPersona("abc"));
 
-  // The role vocabulary against its other two spellings: the YAML node id and the script file.
-  const drainYaml = readFileSync(join(import.meta.dir, "../ticket-dag-drain.yaml"), "utf8");
-  const executeYaml = readFileSync(join(import.meta.dir, "../../ticket-dag-execute/ticket-dag-execute.yaml"), "utf8");
-  const nodeOf: Record<AgentRole, string> = { implement: executeYaml, conflict: executeYaml, review: drainYaml, summary: drainYaml };
+  // The role vocabulary against its other two spellings: the YAML node id and the script file, both in
+  // the folder whose YAML declares the node.
+  const drainDir = join(import.meta.dir, "..");
+  const executeDir = join(import.meta.dir, "../../ticket-dag-execute");
+  const drainYaml = readFileSync(join(drainDir, "ticket-dag-drain.yaml"), "utf8");
+  const executeYaml = readFileSync(join(executeDir, "ticket-dag-execute.yaml"), "utf8");
+  const nodeOf: Record<AgentRole, { yaml: string; dir: string }> = {
+    implement: { yaml: executeYaml, dir: executeDir },
+    conflict: { yaml: executeYaml, dir: executeDir },
+    review: { yaml: drainYaml, dir: drainDir },
+    summary: { yaml: drainYaml, dir: drainDir },
+  };
   for (const role of Object.keys(ROLES) as AgentRole[]) {
-    expect(`${role} is a node id and a script`, new RegExp(`id: ${role}[\\s\\S]*?script: ${role}`).test(nodeOf[role]));
-    expect(`${role} has a script file`, existsSync(join(import.meta.dir, `../scripts/${role}.ts`)));
+    const home = nodeOf[role];
+    expect(`${role} is a node id and a script`, new RegExp(`id: ${role}[\\s\\S]*?script: ${role}`).test(home.yaml));
+    expect(
+      `${role} has a script file in the folder that declares it`,
+      existsSync(join(home.dir, "scripts", `${role}.ts`)),
+    );
     expectEqual(
       `${role}'s session file is its key plus its role`,
       roleSessionFile(ARTIFACTS, "key", role),

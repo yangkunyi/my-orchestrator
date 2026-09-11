@@ -4,7 +4,8 @@
  * The token join lives in node-outcomes-repro.ts (RESOLVE/EMPTY_PICK vs the `when:`/`until_bash`
  * literals); this file covers the rest of the boundary, where nothing reads the YAML today:
  *
- *   node `script:`      -> that workflow folder's scripts/<name>.ts exists
+ *   node `script:`      -> that folder's scripts/<name>.ts exists, and the body, its role and its CLI
+ *                          entry are read from that folder alone, never from the other one
  *   node `timeout:`     -> it runs a role (read out of the script source), and the timeout exceeds
  *                          that role's wall clock, so Archon never kills a turn the agent is still on
  *   `with:` keys        -> the INPUTS_<KEY> name the node protocol reads (node-entry.ts)
@@ -43,17 +44,24 @@ type YamlNode = {
 /** The INPUTS_* names the node protocol reads. Archon owns the mapping; this is the other end of it. */
 const inputsRead = new Set(nodeEntry.match(/INPUTS_[A-Z_]+/g) ?? []);
 /**
- * The role a `script:` name runs, from the one call that says so: roleAgent({ role: "review" ... }).
- * Keyed by file name across both folders on purpose: ticket-dag-execute/scripts/<name>.ts is a
- * re-export shim and the body that calls roleAgent lives in ticket-dag-drain (ADR-0037).
+ * What one workflow folder's own scripts/ offers, keyed by script name: the role that script runs (the
+ * one call that says so is roleAgent({ role: "review" ... })) and whether it is a CLI entry. Read per
+ * folder, never across the pack: a node's script resolves in the folder that declares the node, so a
+ * body left behind in the other folder cannot satisfy it.
  */
-const roleByScript = new Map<string, string>();
+type ScriptFact = { role?: string; entry: boolean };
+const scriptsByDir = new Map<string, Map<string, ScriptFact>>();
 for (const dir of [drainDir, executeDir]) {
+  const byName = new Map<string, ScriptFact>();
   for (const file of readdirSync(join(dir, "scripts"))) {
     if (!file.endsWith(".ts")) continue;
-    const role = /role:\s*"([a-z]+)"/.exec(readFileSync(join(dir, "scripts", file), "utf8"))?.[1];
-    if (role) roleByScript.set(file.replace(/\.ts$/, ""), role);
+    const source = readFileSync(join(dir, "scripts", file), "utf8");
+    byName.set(file.replace(/\.ts$/, ""), {
+      role: /role:\s*"([a-z]+)"/.exec(source)?.[1],
+      entry: /if \(import\.meta\.main\)/.test(source),
+    });
   }
+  scriptsByDir.set(dir, byName);
 }
 const refs = (text: string): string[] => [...text.matchAll(/\$([a-z][\w-]*)\.output/g)].map((m) => m[1]!);
 const listNames = (text: string): string[] =>
@@ -150,46 +158,27 @@ const yamls = [
   { file: "ticket-dag-execute.yaml", dir: executeDir },
 ].map((w) => ({ ...w, text: readFileSync(join(w.dir, w.file), "utf8") }));
 
-/** The script file a node names, in the folder of the workflow that declares it. */
-const scriptExists = (dir: string, name: string): boolean =>
-  existsSync(join(dir, "scripts", `${name}.ts`));
-
-/**
- * A script the pack can actually run: it has a CLI entry, in whichever folder holds the body - execute
- * ships re-export shims (ADR-0037), so the entry for `implement` lives in the drain folder.
- */
-const entryScripts = new Set<string>();
-for (const dir of [drainDir, executeDir]) {
-  for (const file of readdirSync(join(dir, "scripts"))) {
-    if (!file.endsWith(".ts")) continue;
-    if (/if \(import\.meta\.main\)/.test(readFileSync(join(dir, "scripts", file), "utf8"))) {
-      entryScripts.add(file.replace(/\.ts$/, ""));
-    }
-  }
-}
-
 try {
   expect("the node protocol reads INPUTS_* names", inputsRead.size >= 2, [...inputsRead].join(" "));
   expect("the scanner sees the drain's nodes", scanNodes(yamls[0]!.text).length >= 5);
 
   const roleNodes: { id: string; role: string; timeout?: number; file: string }[] = [];
-  const declaredScripts = new Set<string>();
   for (const { file, dir, text } of yamls) {
     const nodes = scanNodes(text);
     const ids = new Set(nodes.map((n) => n.id));
+    const folder = dir.split("/").pop()!;
+    const scripts = scriptsByDir.get(dir)!;
+    const declaredScripts = new Set<string>();
 
     for (const node of nodes) {
-      // `script:` names a file in this workflow's own scripts/ - an execute shim included.
+      // `script:` names a file in this workflow's own scripts/, never in the other folder's.
       if (node.script) {
         declaredScripts.add(node.script);
-        expect(
-          `${file}: script ${node.script} exists in ${dir.split("/").pop()}/scripts`,
-          scriptExists(dir, node.script),
-        );
-        const role = roleByScript.get(node.script);
-        if (role) roleNodes.push({ id: node.id, role, timeout: node.timeout, file });
+        const fact = scripts.get(node.script);
+        expect(`${file}: script ${node.script} exists in ${folder}/scripts`, fact !== undefined);
+        if (fact?.role) roleNodes.push({ id: node.id, role: fact.role, timeout: node.timeout, file });
         // A script that runs an agent must say which role, and belong to that role's own node.
-        if (role) expectEqual(`${file}: node ${node.id} runs its own role`, role, node.id);
+        if (fact?.role) expectEqual(`${file}: node ${node.id} runs its own role`, fact.role, node.id);
       }
 
       // Every name this node depends on, and every node whose output it reads, is declared here.
@@ -238,24 +227,26 @@ try {
         }
       }
     }
-  }
 
-  // A node is a script the workflow can run, and a script the workflow can run is a node: the two
-  // directions must agree, so a dead entry (settle's was, until it stopped being a node) and a library
-  // masquerading as a node both fail here. By name across both folders, per ADR-0037.
-  for (const name of entryScripts) {
-    expect(
-      `entry script ${name} is declared as a node`,
-      declaredScripts.has(name),
-      [...declaredScripts].sort().join(" "),
-    );
-  }
-  for (const name of declaredScripts) {
-    expect(
-      `declared script ${name} has an entry`,
-      entryScripts.has(name),
-      [...entryScripts].sort().join(" "),
-    );
+    // A node is a script this workflow can run, and a script it can run is a node: the two directions
+    // must agree inside one folder, so a dead entry (settle's was, until it stopped being a node) and a
+    // library masquerading as a node both fail here, and a body left in the other folder cannot stand
+    // in for either.
+    for (const [name, fact] of scripts) {
+      if (!fact.entry) continue;
+      expect(
+        `entry script ${name} in ${folder}/scripts is declared as a node`,
+        declaredScripts.has(name),
+        [...declaredScripts].sort().join(" "),
+      );
+    }
+    for (const name of declaredScripts) {
+      expect(
+        `declared script ${name} in ${folder}/scripts has an entry`,
+        scripts.get(name)?.entry === true,
+        [...scripts.keys()].sort().join(" "),
+      );
+    }
   }
 
   // A role is a node, and no agent node runs without a time budget longer than its wall clock.

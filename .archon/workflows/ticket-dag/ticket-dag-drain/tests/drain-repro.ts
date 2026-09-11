@@ -6,8 +6,8 @@ import { noopAgent, RunnerUnavailable } from "../scripts/agent.ts";
 import { rematchLeftovers } from "../scripts/rematch.ts";
 import { REVIEW_BASE_REL } from "../scripts/review-artifacts.ts";
 import { pickStartable } from "../scripts/pick.ts";
-import { conflictTicket } from "../scripts/conflict.ts";
-import { implementTicket } from "../scripts/implement.ts";
+import { conflictTicket } from "../../ticket-dag-execute/scripts/conflict.ts";
+import { implementTicket } from "../../ticket-dag-execute/scripts/implement.ts";
 import {
   addTicketWorktree,
   commitFile,
@@ -389,7 +389,7 @@ try {
     probe,
     [
       `import { join } from "node:path";`,
-      `import { implementTicket } from ${JSON.stringify(join(import.meta.dir, "../scripts/implement.ts"))};`,
+      `import { implementTicket } from ${JSON.stringify(join(import.meta.dir, "../../ticket-dag-execute/scripts/implement.ts"))};`,
       `import { commitTickets, initTarget, mkTemp, writeTicket } from ${JSON.stringify(join(import.meta.dir, "target.ts"))};`,
       `const root = initTarget();`,
       `writeTicket(root, "feat", "01", "demo", "READY", "None");`,
