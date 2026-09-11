@@ -1,5 +1,5 @@
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
-import { dirname, join } from "node:path";
+import { existsSync, mkdirSync, readFileSync, realpathSync, writeFileSync } from "node:fs";
+import { dirname, join, resolve } from "node:path";
 import {
   AGENT_WALL_MS,
   armSessionAbort,
@@ -96,12 +96,161 @@ type SpawnContext = { command: string; cwd: string; env: NodeJS.ProcessEnv };
 
 /**
  * The spawn hook Pi's bash tool is created with: the seam's environment (a Worktree's `.venv` first on
- * PATH) applied to the context the SDK hands it. Exported, like piTools and piTurn, because the SDK
- * captures a spawnHook inside the tool definition where no repro can reach it - this returned value is
- * what actually reaches bash, so a repro can drive it with no session and no credentials.
+ * PATH) applied to the context the SDK hands it. Exported, like piTools and piTurn, because the value
+ * is what bash's child really gets, so a repro can drive it with no session and no credentials;
+ * piBashTool is the factory that mounts it.
  */
 export function piSpawnHook(env: PackAgentOpts["env"]): (ctx: SpawnContext) => SpawnContext {
   return (ctx) => sessionSpawnEnv(env, ctx);
+}
+
+/**
+ * The one bash tool this pack mounts: Pi's own bash definition with this node's spawn hook attached.
+ * Exported because the tool definition is the last link of that chain and the only one nothing can read
+ * back: the SDK keeps the hook inside the definition it builds, so a repro builds the same definition
+ * through this factory, runs one bounded command through it, and asserts the environment the child
+ * really saw (tests/pi-sdk-repro.ts).
+ *
+ * defineTool is the SDK's own wrapper for this array entry: customTools is typed ToolDefinition[], so
+ * contextual typing widens the bash tool's params to unknown, which a concrete definition is not
+ * assignable to (strictFunctionTypes, on its render callback). Without the wrapper the pack does not
+ * typecheck - see tsconfig.pack.json. The return type is left to the SDK for the same reason: the
+ * wrapper is what carries the concrete bash definition's parameter type.
+ */
+export function piBashTool(sdk: PiSdkModule, opts: Pick<PackAgentOpts, "cwd" | "env">) {
+  return sdk.defineTool(sdk.createBashToolDefinition(opts.cwd, { spawnHook: piSpawnHook(opts.env) }));
+}
+
+/**
+ * The Pi SDK package this adapter loads. A dev checkout reaches it by its bare name; an archon run
+ * executes this pack from a workspace copy with no node_modules at all, so the adapter resolves it
+ * deliberately (piSdkCandidates) instead of assuming the machine has one to offer.
+ */
+const PI_SDK_PACKAGE = "@earendil-works/pi-coding-agent";
+
+/**
+ * What the ladder loads, and the shape each path-based candidate is read as. This reference is
+ * type-only (erased before the pack ever runs): the runtime specifiers are the candidates below.
+ */
+type PiSdkModule = typeof import("@earendil-works/pi-coding-agent");
+
+/**
+ * Bun's globals, read off globalThis: the pack runs under bun and tsc checks it without bun's types
+ * (pack-globals.d.ts declares only import.meta). Under any other runtime the ladder just finds less.
+ */
+const bunGlobals = globalThis as {
+  Bun?: {
+    which?: (command: string) => string | null;
+    resolveSync?: (specifier: string, from: string) => string;
+  };
+};
+
+/**
+ * How the ladder reads this machine. Injectable because the machine a repro happens to run on is not
+ * the point of the ladder: "no pi on PATH" and "an executable with no global install" are cases a test
+ * has to be able to name.
+ */
+export type PiSdkLookup = {
+  env: NodeJS.ProcessEnv;
+  execPath: string;
+  whichPi: () => string | null;
+};
+
+function lookupFrom(overrides: Partial<PiSdkLookup> = {}): PiSdkLookup {
+  return {
+    env: overrides.env ?? process.env,
+    execPath: overrides.execPath ?? process.execPath,
+    whichPi: overrides.whichPi ?? (() => bunGlobals.Bun?.which?.("pi") ?? null),
+  };
+}
+
+/**
+ * The file to import for one Pi SDK location: a package directory (the usual case) or an entry file
+ * itself. Bun resolves it through the package's own manifest, so this never spells an entry path the
+ * package could move; a location with no manifest is handed to the import to report.
+ */
+export function piSdkEntry(path: string): string {
+  const abs = resolve(path);
+  try {
+    return bunGlobals.Bun?.resolveSync?.(abs, dirname(abs)) ?? abs;
+  } catch {
+    return abs;
+  }
+}
+
+/** The SDK package directory inside one `node_modules`, when it is really installed there. */
+function installedPiSdk(nodeModules: string): string[] {
+  const dir = join(nodeModules, PI_SDK_PACKAGE);
+  return existsSync(join(dir, "package.json")) ? [dir] : [];
+}
+
+/** Every `node_modules` above a path, nearest first: the order a bare specifier would search them. */
+function nodeModulesAbove(path: string): string[] {
+  const found: string[] = [];
+  for (let dir = dirname(path); ; dir = dirname(dir)) {
+    const nodeModules = join(dir, "node_modules");
+    if (existsSync(nodeModules)) found.push(nodeModules);
+    if (dirname(dir) === dir) break;
+  }
+  return found;
+}
+
+function realpathOrSelf(path: string): string {
+  try {
+    return realpathSync(path);
+  } catch {
+    return path; /* gone between the PATH lookup and this call */
+  }
+}
+
+/**
+ * The Pi SDK package directories this machine derives, most likely first: the install tree the `pi` CLI
+ * itself lives in (following the symlink a CLI is usually installed as, then walking up the node_modules
+ * chain a bare specifier would), then this process's own install root - the `../lib/node_modules` a
+ * global node install uses.
+ */
+function derivedPiSdkDirs(lookup: PiSdkLookup): string[] {
+  const dirs: string[] = [];
+  const cli = lookup.whichPi();
+  if (cli) {
+    for (const nodeModules of nodeModulesAbove(realpathOrSelf(cli))) dirs.push(...installedPiSdk(nodeModules));
+  }
+  dirs.push(...installedPiSdk(join(dirname(lookup.execPath), "..", "lib", "node_modules")));
+  return [...new Set(dirs)];
+}
+
+/**
+ * Every specifier the ladder imports, in order. `PI_SDK_PATH` is the operator's word: when it is set it
+ * is the whole ladder, because a path that does not load is the problem to report, not a hint to
+ * ignore. Otherwise the bare name first - the dev checkout, the one specifier only the import itself
+ * can settle - and then the package directories this machine derives.
+ */
+export function piSdkCandidates(overrides: Partial<PiSdkLookup> = {}): string[] {
+  const lookup = lookupFrom(overrides);
+  const override = lookup.env.PI_SDK_PATH?.trim();
+  if (override) return [piSdkEntry(override)];
+  return [PI_SDK_PACKAGE, ...derivedPiSdkDirs(lookup).map(piSdkEntry)];
+}
+
+/**
+ * The Pi SDK, from the first candidate in the ladder that loads. A failure here is RunnerUnavailable,
+ * never a turn: this runner never started (agent.ts), so no Ticket is blamed for it. The message names
+ * PI_SDK_PATH because that is the one fix an operator has where the bare name cannot resolve.
+ */
+export async function loadPiSdk(overrides: Partial<PiSdkLookup> = {}): Promise<PiSdkModule> {
+  const tried: string[] = [];
+  for (const candidate of piSdkCandidates(overrides)) {
+    try {
+      return (await import(candidate)) as PiSdkModule;
+    } catch (e) {
+      tried.push(`${candidate} (${e instanceof Error ? e.message : String(e)})`);
+    }
+  }
+  throw new RunnerUnavailable(
+    `cannot reach the Pi SDK ${PI_SDK_PACKAGE}: tried ${tried.join("; ")}. ` +
+      `An Archon run executes this pack from a workspace copy with no node_modules, so set PI_SDK_PATH ` +
+      `to the installed package directory - the one \`npm root -g\` names underneath.`,
+  );
 }
 
 /**
@@ -146,16 +295,8 @@ export async function runPackPi(opts: PackAgentOpts): Promise<PackAgentResult> {
  * Ticket - the runner could not start (RunnerUnavailable, agent.ts) - and nothing here is a turn.
  */
 async function startPiSession(opts: PackAgentOpts) {
-  const {
-    createAgentSession,
-    createBashToolDefinition,
-    DefaultResourceLoader,
-    defineTool,
-    getAgentDir,
-    ModelRuntime,
-    resolveCliModel,
-    SessionManager,
-  } = await import("@earendil-works/pi-coding-agent");
+  const pi = await loadPiSdk();
+  const { createAgentSession, DefaultResourceLoader, getAgentDir, ModelRuntime, resolveCliModel, SessionManager } = pi;
 
   const sessionFile = roleSessionFile(opts.artifactsDir, opts.sessionKey, opts.role);
   mkdirSync(dirname(sessionFile), { recursive: true });
@@ -192,17 +333,7 @@ async function startPiSession(opts: PackAgentOpts) {
     sessionManager,
     resourceLoader,
     ...(tools ? { tools } : {}),
-    // defineTool is the SDK's own wrapper for this array: customTools is typed ToolDefinition[], so
-    // contextual typing widens the bash tool's params to unknown, which a concrete definition is not
-    // assignable to (strictFunctionTypes, on its render callback). Without the wrapper the pack does
-    // not typecheck - see tsconfig.pack.json.
-    customTools: [
-      defineTool(
-        createBashToolDefinition(opts.cwd, {
-          spawnHook: piSpawnHook(opts.env),
-        }),
-      ),
-    ],
+    customTools: [piBashTool(pi, opts)],
   });
 
   let aborted = false;

@@ -165,8 +165,8 @@ try {
     expect("a cwd with no .venv hands the base back as it was", noVenv === base && noVenv.PATH === base.PATH);
 
     // What Pi hands bash, without a session: piSpawnHook is the value the adapter passes to the SDK, so
-    // the test drives that value. The SDK captures a spawnHook inside the tool definition, where nothing
-    // can reach it, and Pi's execute needs a whole ExtensionContext. dsh's half is behavioural in
+    // the test drives that value. Whether a session really mounts it is the next link, and it is driven
+    // there through the mounted definition itself (pi-sdk-repro.ts). dsh's half is behavioural in
     // dsh-agent-repro.ts, through its stub's recorded child environment.
     const ctx = { command: "uv run pytest", cwd: worktree, env: base };
     const spawned = piSpawnHook((b) => sessionEnv(worktree, b))(ctx);
