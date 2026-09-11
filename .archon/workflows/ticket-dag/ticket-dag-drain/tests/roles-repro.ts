@@ -1,23 +1,37 @@
 #!/usr/bin/env bun
 /**
- * Temp-Target repro: the role table. One entry per role owns the session key, the persona, the tool
- * allowlist, the bash need and the wall clock - and the node id, script filename and session filename
- * spell the same four role names.
+ * Temp-Target repro: the role table. One entry per role owns the session key, the persona and the wall
+ * clock - and the node id, script filename and session filename spell the same four role names.
+ *
+ * The table is data: it touches no filesystem and reads no environment. The one machine fact a persona
+ * rests on (the tdd tree) is an argument of the call, so this file hands in its own and asserts on it.
  */
 import { existsSync, mkdirSync, readFileSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import { AGENT_WALL_MS, type AgentRole } from "../scripts/agent.ts";
 import type { PackConfig } from "../scripts/config.ts";
-import { personaFor, readTddSkill, REVIEW_AXES, reviewPersona, summaryPersona } from "../scripts/prompt.ts";
+import {
+  conflictPersona,
+  implementPersona,
+  REVIEW_AXES,
+  reviewPersona,
+  summaryPersona,
+  type TddSkill,
+} from "../scripts/prompt.ts";
 import { REVIEW_WALL_MS, ROLES, roleAgent } from "../scripts/roles.ts";
 import { roleSessionFile } from "../scripts/session-log.ts";
 import { expect, expectEqual, mkTemp } from "./target.ts";
 
-// The table builds strings and opts; its only filesystem touch is the tdd tree an implement node runs under.
 const ARTIFACTS = "/artifacts";
 const CWD = "/worktree";
 const CONFIG: PackConfig = { model: "highland/deepseek-v4-flash", thinkingLevel: "high", concurrency: 4, runner: "pi" };
 const TASK = "TASK";
+// A tree no machine has, so a table that read the machine's own would name a different path here.
+const FAKE_RULE = "Fake rule one.";
+const FAKE_SKILL: TddSkill = {
+  dir: "/fake/tdd-tree",
+  body: `# Fake TDD\n\n${FAKE_RULE}\n\nSee the codebase-design skill for interface work.\n`,
+};
 
 try {
   expectEqual(
@@ -28,7 +42,7 @@ try {
 
   const impl = roleAgent({
     role: "implement",
-    args: { ticketId: "feat/01" },
+    args: { ticketId: "feat/01", skill: FAKE_SKILL },
     cwd: CWD,
     artifactsDir: ARTIFACTS,
     config: CONFIG,
@@ -64,7 +78,7 @@ try {
     mkdirSync(join(worktree, ".venv", "bin"), { recursive: true });
     const inWorktree = roleAgent({
       role: "implement",
-      args: { ticketId: "feat/01" },
+      args: { ticketId: "feat/01", skill: FAKE_SKILL },
       cwd: worktree,
       artifactsDir: ARTIFACTS,
       config: CONFIG,
@@ -81,29 +95,46 @@ try {
     rmSync(worktree, { recursive: true, force: true });
   }
   expectEqual("implement wall clock is the ticket clock", impl.wallMs, AGENT_WALL_MS);
-  expectEqual("implement persona is the skill", impl.persona, personaFor("implement", "pi", { skill: undefined }));
+  // The call's own arguments are what the persona is built from - nothing ambient.
+  expectEqual("implement persona is the skill", impl.persona, implementPersona("pi", FAKE_SKILL));
+  expect("pi's session advertises the tdd skill, so the call's skill is unused there", !impl.persona.includes(FAKE_RULE));
 
   const dshImplement = roleAgent({
     role: "implement",
-    args: { ticketId: "feat/01" },
+    args: { ticketId: "feat/01", skill: FAKE_SKILL },
     cwd: CWD,
     artifactsDir: ARTIFACTS,
     config: { ...CONFIG, runner: "dsh" },
     prompt: TASK,
   });
-  // The table reads the tree the machine carries, so on a machine that has one the persona must be
-  // the tree's and not the inlined fallback. A table that quietly passed nothing would fall back here.
-  const tree = readTddSkill();
+  // A table that read the machine's tree instead of using the argument would name that tree here; this
+  // path exists on no machine, so only the value the call carried can produce it.
   expect(
-    "the table's dsh persona is the tree's, not the inlined fallback",
-    tree === undefined || (dshImplement.persona ?? "").includes("The tdd skill, in full, from "),
+    "the table's dsh persona comes from the skill the call carries",
+    (dshImplement.persona ?? "").includes(`from ${FAKE_SKILL.dir}`),
+  );
+  expect("and carries that skill's body", (dshImplement.persona ?? "").includes(FAKE_RULE));
+  expect(
+    "the out-of-scope paragraph is dropped on this path too",
+    !(dshImplement.persona ?? "").includes("codebase-design"),
   );
   expectEqual(
     "the runner reaches the persona",
     dshImplement.persona,
-    personaFor("implement", "dsh", { skill: readTddSkill() }),
+    implementPersona("dsh", FAKE_SKILL),
   );
-  expect("dsh implement persona carries the tdd body", (dshImplement.persona ?? "").includes("Red before green."));
+
+  // No skill at all is the inlined fallback, and it is a different persona from a supplied tree.
+  const fallbackImplement = roleAgent({
+    role: "implement",
+    args: { ticketId: "feat/03", skill: undefined },
+    cwd: CWD,
+    artifactsDir: ARTIFACTS,
+    config: { ...CONFIG, runner: "dsh" },
+    prompt: TASK,
+  });
+  expect("a call with no skill falls back to the inlined body", (fallbackImplement.persona ?? "").includes("Red before green."));
+  expect("and is not the tree's persona", fallbackImplement.persona !== dshImplement.persona);
 
   const conflict = roleAgent({
     role: "conflict",
@@ -114,8 +145,18 @@ try {
     prompt: TASK,
   });
   expectEqual("conflict session key is the Ticket", conflict.sessionKey, "feat/02");
-  expectEqual("conflict persona is the skill", conflict.persona, personaFor("conflict", "pi"));
+  expectEqual("conflict persona is the skill", conflict.persona, conflictPersona());
   expectEqual("conflict wall clock is the ticket clock", conflict.wallMs, AGENT_WALL_MS);
+  // The resolve procedure is one text, so no runner and no argument changes it.
+  const dshConflict = roleAgent({
+    role: "conflict",
+    args: { ticketId: "feat/02" },
+    cwd: CWD,
+    artifactsDir: ARTIFACTS,
+    config: { ...CONFIG, runner: "dsh" },
+    prompt: TASK,
+  });
+  expectEqual("the runner does not change the conflict persona", dshConflict.persona, conflict.persona);
 
   // A review axis is not a Ticket: its session is keyed by the axis, and its persona by the range.
   const review = roleAgent({
@@ -144,14 +185,6 @@ try {
   expectEqual("summary session key is the node's own name", summary.sessionKey, "drain-summary");
   expectEqual("summary wall clock", summary.wallMs, REVIEW_WALL_MS);
   expectEqual("summary persona merges the reviews", summary.persona, summaryPersona("abc"));
-
-  // Every role goes through the same persona dispatch, so no caller re-spells a role's contract.
-  expectEqual(
-    "the review persona has one spelling",
-    personaFor("review", "pi", { base: "abc", axis: REVIEW_AXES[2] }),
-    reviewPersona("abc", REVIEW_AXES[2]),
-  );
-  expectEqual("the summary persona has one spelling", personaFor("summary", "pi", { base: "abc" }), summaryPersona("abc"));
 
   // The role vocabulary against its other two spellings: the YAML node id and the script file.
   const drainYaml = readFileSync(join(import.meta.dir, "../ticket-dag-drain.yaml"), "utf8");

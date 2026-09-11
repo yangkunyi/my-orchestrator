@@ -1,17 +1,21 @@
 import { AGENT_WALL_MS, type AgentRole, type PackAgentOpts } from "./agent.ts";
 import type { PackConfig, Runner } from "./config.ts";
-import { personaFor, readTddSkill } from "./prompt.ts";
+import { conflictPersona, implementPersona, reviewPersona, summaryPersona, type TddSkill } from "./prompt.ts";
 import { sessionEnv } from "./worktree-env.ts";
 
 /** The drain-end readers share one clock: review and summary read the same range and report on it. */
 export const REVIEW_WALL_MS = 30 * 60 * 1000;
 
 /**
- * What a role needs beyond the runner. The ticket nodes key their session on a Ticket; the drain-end
- * readers key theirs on the range they read, so no caller has to hand a review axis a Ticket id.
+ * What one role call carries. This is the only declaration of a role's arguments: each persona reads
+ * them here through its own builder, so the two can no longer be kept in sync by hand.
+ *
+ * `skill` is the one machine fact a persona rests on: the tdd tree an implement node runs under. It is
+ * an argument because the table is data - the node that composes the call reads the tree once, at that
+ * edge, and hands it in (prompt.ts readTddSkill). Pi ignores it: its session advertises the skill.
  */
 export type RoleShape = {
-  implement: { ticketId: string };
+  implement: { ticketId: string; skill: TddSkill | undefined };
   conflict: { ticketId: string };
   review: { axisIndex: number; base: string; axis: string };
   summary: { base: string };
@@ -39,24 +43,22 @@ type RoleSpec<A> = {
 export const ROLES: { [K in AgentRole]: RoleSpec<RoleShape[K]> } = {
   implement: {
     sessionKey: (args) => args.ticketId,
-    // The one ambient fact an implement node rests on lives here: the table reads the tdd tree its
-    // machine carries - once, where the role's persona is composed - and hands it to the builder.
-    persona: (runner) => personaFor("implement", runner, { skill: readTddSkill() }),
+    persona: (runner, args) => implementPersona(runner, args.skill),
     wallMs: AGENT_WALL_MS,
   },
   conflict: {
     sessionKey: (args) => args.ticketId,
-    persona: (runner) => personaFor("conflict", runner),
+    persona: () => conflictPersona(),
     wallMs: AGENT_WALL_MS,
   },
   review: {
     sessionKey: (args) => `drain-review-${args.axisIndex + 1}`,
-    persona: (runner, args) => personaFor("review", runner, args),
+    persona: (runner, args) => reviewPersona(args.base, args.axis),
     wallMs: REVIEW_WALL_MS,
   },
   summary: {
     sessionKey: () => "drain-summary",
-    persona: (runner, args) => personaFor("summary", runner, args),
+    persona: (runner, args) => summaryPersona(args.base),
     wallMs: REVIEW_WALL_MS,
   },
 };

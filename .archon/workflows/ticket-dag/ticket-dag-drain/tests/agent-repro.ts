@@ -3,7 +3,7 @@
 import { mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { AGENT_WALL_MS, armSessionAbort, defaultAgent, noopAgent, packAnswer, RunnerUnavailable } from "../scripts/agent.ts";
-import { composeMessage, conflictTask, implementTask, personaFor, REVIEW_AXES, reviewPersona, reviewTask } from "../scripts/prompt.ts";
+import { composeMessage, conflictPersona, conflictTask, implementPersona, implementTask, REVIEW_AXES, reviewPersona, reviewTask } from "../scripts/prompt.ts";
 import { PI_READ_ONLY_TOOLS, piSpawnHook, piTools, piTurn } from "../scripts/pi-session.ts";
 import { proxyEnv } from "../scripts/proxy.ts";
 import { readPiSession, roleSessionFile } from "../scripts/session-log.ts";
@@ -15,7 +15,7 @@ const executeYaml = join(import.meta.dir, "../../ticket-dag-execute/ticket-dag-e
 const drainYaml = join(import.meta.dir, "../ticket-dag-drain.yaml");
 
 try {
-  const impl = composeMessage(personaFor("implement", "pi"), implementTask(".scratch/feat/issues/01-demo.md"));
+  const impl = composeMessage(implementPersona("pi", undefined), implementTask(".scratch/feat/issues/01-demo.md"));
   expect("implement inlines skill body", impl.includes("Use /tdd where possible, at pre-agreed seams."));
   expect("implement has ticket path", impl.includes(".scratch/feat/issues/01-demo.md"));
   expect("implement leaves Status unchanged", impl.includes("Leave the ticket file's `Status:` line unchanged"));
@@ -24,7 +24,7 @@ try {
   expect("implement drops /code-review", !impl.includes("/code-review"));
   expect("implement has no two-axis fanout", !impl.includes("diff-reviewer") && !impl.includes("## Standards"));
 
-  const conf = composeMessage(personaFor("conflict", "pi"), conflictTask(".scratch/feat/issues/01-demo.md"));
+  const conf = composeMessage(conflictPersona(), conflictTask(".scratch/feat/issues/01-demo.md"));
   expect("conflict inlines skill body", conf.includes("Always resolve; never `--abort`."));
   expect("conflict has ticket path", conf.includes(".scratch/feat/issues/01-demo.md"));
   expect("conflict leaves Status unchanged", conf.includes("Leave the ticket file's `Status:` line unchanged"));
@@ -243,24 +243,24 @@ try {
     dir: "/skills/tdd",
     body: "---\nname: tdd\ndescription: stub\n---\n\nRed before green.\n\nConsult the codebase-design skill for the vocabulary.\n",
   };
-  expect("Pi implement persona is the skill alone", !personaFor("implement", "pi").includes("Red before green."));
+  expect("Pi implement persona is the skill alone", !implementPersona("pi", tddSkill).includes("Red before green."));
   expect(
     "dsh implement persona carries the tdd body",
-    personaFor("implement", "dsh", { skill: tddSkill }).includes("Red before green."),
+    implementPersona("dsh", tddSkill).includes("Red before green."),
   );
   expect(
     "dsh implement persona drops the codebase-design pointer",
-    !personaFor("implement", "dsh", { skill: tddSkill }).includes("codebase-design"),
+    !implementPersona("dsh", tddSkill).includes("codebase-design"),
   );
   expect(
     "dsh implement persona names the tree it came from",
-    personaFor("implement", "dsh", { skill: tddSkill }).includes("/skills/tdd"),
+    implementPersona("dsh", tddSkill).includes("/skills/tdd"),
   );
   expect(
     "an absent skill falls back to the inlined body",
-    personaFor("implement", "dsh", { skill: undefined }).includes("Red before green."),
+    implementPersona("dsh", undefined).includes("Red before green."),
   );
-  expect("both implement personas stay the same skill", personaFor("implement", "pi").startsWith("Implement the work described by the user"));
+  expect("both implement personas stay the same skill", implementPersona("pi", undefined).startsWith("Implement the work described by the user"));
 
   const yaml = readFileSync(executeYaml, "utf8");
   expect("implement node timeout 7500000", /id: implement[\s\S]*?timeout: 7500000/.test(yaml));

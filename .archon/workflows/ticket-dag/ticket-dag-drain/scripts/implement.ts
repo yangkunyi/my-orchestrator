@@ -4,7 +4,7 @@ import { loadConfig, type PackConfig } from "./config.ts";
 import { failTicket, withMergeLock } from "./main-writes.ts";
 import { runNode } from "./node-entry.ts";
 import { nodeLine, type SettleResult } from "./node-outcomes.ts";
-import { implementTask } from "./prompt.ts";
+import { implementTask, readTddSkill } from "./prompt.ts";
 import { roleAgent } from "./roles.ts";
 import { settleAfterAgent } from "./settle.ts";
 import { scanTickets } from "./tickets.ts";
@@ -24,7 +24,11 @@ export async function implementTicket(
   const runAgent: AgentRunner = opts.runAgent ?? defaultAgent;
   const agentOpts = roleAgent({
     role: "implement",
-    args: { ticketId: ticket.id },
+    // The one machine fact an implement persona rests on, read where this call is composed. Read for
+    // both runners: the persona is the same value either way, so it must not depend on which runner
+    // happens to need the skill. Where the tree lives is prompt.ts's to say; that it is read here, and
+    // not inside the role table, is this node's (roles.ts).
+    args: { ticketId: ticket.id, skill: readTddSkill() },
     cwd: begun.worktree,
     artifactsDir: opts.artifactsDir,
     config,

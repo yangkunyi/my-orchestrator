@@ -375,6 +375,49 @@ try {
     expectEqual("the backlog is untouched", statusOf(root, r02), "READY");
   });
 
+  // The implement node is where the machine is read: the tdd tree its persona runs under. With a HOME of
+  // our own the tree is a stub whose rule can only reach a persona if the node read it and handed it to
+  // the role's arguments. In a child process, because os.homedir() keeps the environment this process
+  // started with (measured - an in-process change to HOME does not move it).
+  const fakeHome = mkTemp("pack-probe-home-");
+  const probeRule = "STUB-TREE-RULE-ONLY-THIS-HOME-HAS";
+  const probeTree = join(fakeHome, ".pi", "agent", "skills", "tdd");
+  mkdirSync(probeTree, { recursive: true });
+  writeFileSync(join(probeTree, "SKILL.md"), `---\nname: tdd\ndescription: stub\n---\n\n${probeRule}\n`);
+  const probe = join(fakeHome, "implement-skill-probe.ts");
+  writeFileSync(
+    probe,
+    [
+      `import { join } from "node:path";`,
+      `import { implementTicket } from ${JSON.stringify(join(import.meta.dir, "../scripts/implement.ts"))};`,
+      `import { commitTickets, initTarget, mkTemp, writeTicket } from ${JSON.stringify(join(import.meta.dir, "target.ts"))};`,
+      `const root = initTarget();`,
+      `writeTicket(root, "feat", "01", "demo", "READY", "None");`,
+      `commitTickets(root);`,
+      `let persona = "";`,
+      `await implementTicket(root, "feat/01", {`,
+      `  artifactsDir: mkTemp("pack-probe-artifacts-"),`,
+      `  config: { model: undefined, thinkingLevel: "high", concurrency: 4, runner: "dsh" },`,
+      `  runAgent: async (opts: { persona: string }) => {`,
+      `    persona = opts.persona;`,
+      `    return { sessionFile: "/nonexistent", answer: { kind: "text", text: "stub" }, lastError: undefined };`,
+      `  },`,
+      `});`,
+      `console.log(JSON.stringify({`,
+      `  hasRule: persona.includes(${JSON.stringify(probeRule)}),`,
+      `  namesTree: persona.includes(${JSON.stringify(probeTree)}),`,
+      `}));`,
+    ].join("\n"),
+  );
+  const probeProc = runScript(probe, fakeHome, { HOME: fakeHome });
+  expect("the skill probe ran the implement node", probeProc.status === 0, probeProc.stderr.slice(0, 300));
+  const probeSeen = JSON.parse(probeProc.stdout.trim()) as { hasRule: boolean; namesTree: boolean };
+  expect(
+    "the implement node reads the tdd tree and hands it to the role's persona",
+    probeSeen.hasRule && probeSeen.namesTree,
+    probeProc.stdout.trim(),
+  );
+
   console.log(JSON.stringify({ ok: true }));
 } catch (e) {
   console.log(JSON.stringify({ ok: false, error: e instanceof Error ? e.message : String(e) }));

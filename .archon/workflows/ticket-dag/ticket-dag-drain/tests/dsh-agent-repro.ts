@@ -9,7 +9,7 @@ import type { ThinkingLevel } from "../scripts/config.ts";
 import type { PackAgentOpts } from "../scripts/agent.ts";
 import { dshAgent } from "../scripts/dsh-agent.ts";
 import { DshRuntime } from "../scripts/dsh-runtime.ts";
-import { implementTask, personaFor, readTddSkill, REVIEW_AXES, reviewPersona, reviewTask } from "../scripts/prompt.ts";
+import { conflictPersona, implementPersona, implementTask, readTddSkill, REVIEW_AXES, reviewPersona, reviewTask } from "../scripts/prompt.ts";
 import { sessionEnv } from "../scripts/worktree-env.ts";
 import { expect, expectEqual, expectReject, mkTemp, runScript } from "./target.ts";
 
@@ -131,7 +131,7 @@ try {
   const task = implementTask("tickets/01-demo.md");
   // A Ticket Worktree has a .venv once `uv sync` has run; the stub records the PATH it was spawned with.
   mkdirSync(join(work, ".venv", "bin"), { recursive: true });
-  const result = await run({ role: "implement", task, persona: personaFor("implement", "dsh", { skill }) });
+  const result = await run({ role: "implement", task, persona: implementPersona("dsh", skill) });
   const got = JSON.parse(readFileSync(seen, "utf8")) as Record<string, any>;
 
   expectEqual("stub launched with the minimal profile", got.argv.join(" "), "--profile sdk-minimal");
@@ -174,7 +174,7 @@ try {
   );
   // The Target has no .venv, so the drain-end readers' base environment is passed through untouched.
   const target = mkTemp("pack-dsh-main-");
-  await run({ role: "conflict", task: "resolve the conflict", persona: personaFor("conflict", "dsh"), cwd: target });
+  await run({ role: "conflict", task: "resolve the conflict", persona: conflictPersona(), cwd: target });
   const gotMain = JSON.parse(readFileSync(seen, "utf8")) as Record<string, any>;
   expectEqual("a cwd without a .venv leaves PATH alone", gotMain.path, saved.PATH ?? "");
   expectEqual("and still gets the harness variables", gotMain.home, home);
@@ -183,7 +183,7 @@ try {
   const second = await run({
     role: "conflict",
     task: "resolve the conflict",
-    persona: personaFor("conflict", "dsh"),
+    persona: conflictPersona(),
     model: "custom-model",
   });
   const got2 = JSON.parse(readFileSync(seen, "utf8")) as Record<string, any>;
@@ -193,7 +193,7 @@ try {
 
   // A turn that spoke no text at all is not an empty answer and not a log to re-read: it says so.
   process.env.STUB_SILENT = "1";
-  const quiet = await run({ role: "conflict", task: "resolve the conflict", persona: personaFor("conflict", "dsh") });
+  const quiet = await run({ role: "conflict", task: "resolve the conflict", persona: conflictPersona() });
   expectEqual("a turn with no assistant text answers none", quiet.answer, { kind: "none" });
   delete process.env.STUB_SILENT;
 
@@ -223,7 +223,7 @@ try {
     ["xhigh", "high"],
     ["max", "max"],
   ] as const) {
-    await run({ role: "conflict", task: "resolve the conflict", persona: personaFor("conflict", "dsh"), level });
+    await run({ role: "conflict", task: "resolve the conflict", persona: conflictPersona(), level });
     const mapped = JSON.parse(readFileSync(seen, "utf8")) as Record<string, any>;
     expectEqual(`thinkingLevel ${level} maps to effort ${effort}`, mapped.initialize.reasoningEffort, effort);
   }
@@ -258,14 +258,14 @@ try {
   process.env.DSH_BIN = join(work, "no-such-dsh");
   await expectReject(
     "a dsh that cannot spawn is a runner that could not start",
-    () => run({ role: "implement", task, persona: personaFor("implement", "dsh", { skill }) }),
+    () => run({ role: "implement", task, persona: implementPersona("dsh", skill) }),
     /the dsh runner could not start: /,
   );
   process.env.DSH_BIN = stub;
 
   // The dsh implement persona's tdd section is a pure function of the skill the caller hands it:
   // the tree-found and the tree-absent branch are both asserted here, with no child and no HOME.
-  const suppliedPersona = personaFor("implement", "dsh", { skill });
+  const suppliedPersona = implementPersona("dsh", skill);
   expect("the supplied skill body feeds the persona", suppliedPersona.includes("Red before green."));
   expect("the out-of-scope pointer is filtered out", !suppliedPersona.includes("codebase-design"));
   expect("the persona names the tree it came from", suppliedPersona.includes(skill.dir));
@@ -278,13 +278,13 @@ try {
   const treeDir = join(work, "tree-with-skill");
   mkdirSync(treeDir, { recursive: true });
   writeFileSync(join(treeDir, "SKILL.md"), skill.body);
-  const found = personaFor("implement", "dsh", { skill: readTddSkill(treeDir) });
+  const found = implementPersona("dsh", readTddSkill(treeDir));
   expect("the reader finds a tree on disk", found.includes("Red before green."));
   expect("and the persona names that tree", found.includes(treeDir));
 
   const missingTree = join(work, "no-such-tree");
   expectEqual("a missing tree reads as undefined, not a thrown error", readTddSkill(missingTree), undefined);
-  const fallbackPersona = personaFor("implement", "dsh", { skill: readTddSkill(missingTree) });
+  const fallbackPersona = implementPersona("dsh", readTddSkill(missingTree));
   expect("no skill tree falls back to the inlined body", fallbackPersona.includes("Red before green."));
   expect("the fallback drops the pointer too", !fallbackPersona.includes("codebase-design"));
   expect("a supplied skill and an absent one are different personas", fallbackPersona !== suppliedPersona);

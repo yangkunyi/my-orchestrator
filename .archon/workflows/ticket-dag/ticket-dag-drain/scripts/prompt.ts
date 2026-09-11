@@ -2,7 +2,6 @@ import { existsSync, readFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import { STATUSES } from "./ticket-line.ts";
-import type { AgentRole } from "./agent.ts";
 import type { Runner } from "./config.ts";
 
 /** The Status vocabulary as the prompts spell it. */
@@ -112,49 +111,20 @@ export function tddPersona(skill: TddSkill | undefined): string {
   return `The tdd skill, in full, from ${skill.dir}. Its siblings tests.md and mocking.md live in that directory: read either with bash when the test needs it.\n\n${body}`;
 }
 
-/** The arguments a role's persona needs beyond the runner: the dsh skill, or the drain-end range. */
-export type PersonaArgs = {
-  implement: { skill: TddSkill | undefined };
-  conflict: undefined;
-  review: { base: string; axis: string };
-  summary: { base: string };
-};
-
-/** The roles with no further input take no argument; implement's skill may be omitted for the fallback. */
-type PersonaRest<R extends AgentRole> = R extends "implement"
-  ? [args?: PersonaArgs["implement"]]
-  : PersonaArgs[R] extends undefined
-    ? []
-    : [args: PersonaArgs[R]];
-
 /**
- * The persona a role runs under: the skill of a ticket node, or the contract of a drain-end reader
- * built from the range it is handed. The dsh skill is the caller's to supply; a node that supplies
- * none runs the inlined fallback, so this builder never reads the machine's tree itself - the role
- * table reads it once and hands it in.
+ * The implement persona: the skill, plus the tdd section only dsh needs. Pi's session prompt advertises
+ * the skill catalog and its read tool opens the file, so the skill is unused there. `skill` is the role
+ * call's own argument (roles.ts spells the call, so there is no second list of what a role carries), and
+ * the node that composes an implement call reads it at that edge - this builder never touches the tree.
  */
-export function personaFor<R extends AgentRole>(
-  role: R,
-  runner: Runner | undefined,
-  ...args: PersonaRest<R>
-): string {
-  switch (role) {
-    case "conflict":
-      return CONFLICT_SKILL;
-    case "implement": {
-      if (runner !== "dsh") return IMPLEMENT_SKILL;
-      const own = args[0] as PersonaArgs["implement"] | undefined;
-      return `${IMPLEMENT_SKILL}\n\n${tddPersona(own?.skill)}`;
-    }
-    case "review": {
-      const own = args[0] as PersonaArgs["review"];
-      return reviewPersona(own.base, own.axis);
-    }
-    case "summary": {
-      const own = args[0] as PersonaArgs["summary"];
-      return summaryPersona(own.base);
-    }
-  }
+export function implementPersona(runner: Runner | undefined, skill: TddSkill | undefined): string {
+  if (runner !== "dsh") return IMPLEMENT_SKILL;
+  return `${IMPLEMENT_SKILL}\n\n${tddPersona(skill)}`;
+}
+
+/** The conflict persona: the resolve procedure, one text for both runners. */
+export function conflictPersona(): string {
+  return CONFLICT_SKILL;
 }
 
 /** The drain-end review axes, in report order: the title each reviewer is told to check. */
