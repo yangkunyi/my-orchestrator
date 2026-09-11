@@ -149,11 +149,26 @@ const yamls = [
 const scriptExists = (dir: string, name: string): boolean =>
   existsSync(join(dir, "scripts", `${name}.ts`));
 
+/**
+ * A script the pack can actually run: it has a CLI entry, in whichever folder holds the body - execute
+ * ships re-export shims (ADR-0037), so the entry for `implement` lives in the drain folder.
+ */
+const entryScripts = new Set<string>();
+for (const dir of [drainDir, executeDir]) {
+  for (const file of readdirSync(join(dir, "scripts"))) {
+    if (!file.endsWith(".ts")) continue;
+    if (/if \(import\.meta\.main\)/.test(readFileSync(join(dir, "scripts", file), "utf8"))) {
+      entryScripts.add(file.replace(/\.ts$/, ""));
+    }
+  }
+}
+
 try {
   expect("the node protocol reads INPUTS_* names", inputsRead.size >= 2, [...inputsRead].join(" "));
   expect("the scanner sees the drain's nodes", scanNodes(yamls[0]!.text).length >= 5);
 
   const roleNodes: { id: string; role: string; timeout?: number; file: string }[] = [];
+  const declaredScripts = new Set<string>();
   for (const { file, dir, text } of yamls) {
     const nodes = scanNodes(text);
     const ids = new Set(nodes.map((n) => n.id));
@@ -161,6 +176,7 @@ try {
     for (const node of nodes) {
       // `script:` names a file in this workflow's own scripts/ - an execute shim included.
       if (node.script) {
+        declaredScripts.add(node.script);
         expect(
           `${file}: script ${node.script} exists in ${dir.split("/").pop()}/scripts`,
           scriptExists(dir, node.script),
@@ -196,6 +212,24 @@ try {
         }
       }
     }
+  }
+
+  // A node is a script the workflow can run, and a script the workflow can run is a node: the two
+  // directions must agree, so a dead entry (settle's was, until it stopped being a node) and a library
+  // masquerading as a node both fail here. By name across both folders, per ADR-0037.
+  for (const name of entryScripts) {
+    expect(
+      `entry script ${name} is declared as a node`,
+      declaredScripts.has(name),
+      [...declaredScripts].sort().join(" "),
+    );
+  }
+  for (const name of declaredScripts) {
+    expect(
+      `declared script ${name} has an entry`,
+      entryScripts.has(name),
+      [...entryScripts].sort().join(" "),
+    );
   }
 
   // A role is a node, and no agent node runs without a time budget longer than its wall clock.
