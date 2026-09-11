@@ -71,6 +71,9 @@ export class DshRuntime {
 
   constructor(private readonly opts: DshRuntimeOpts) {
     this.sessionId = `session-${crypto.randomUUID().replace(/-/g, "")}`;
+    // DSH_BIN is this module's test hook: tests/dsh-agent-repro.ts points it at a stub harness. It is
+    // the one variable read from this process rather than from the caller's environment, and nothing
+    // in the pack sets it. Unset, the child is `dsh`, which Bun resolves off opts.env's PATH.
     this.child = spawn(process.env.DSH_BIN?.trim() || "dsh", opts.argv, {
       cwd: opts.cwd,
       env: opts.env,

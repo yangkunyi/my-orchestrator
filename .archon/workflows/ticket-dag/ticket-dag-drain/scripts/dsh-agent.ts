@@ -26,7 +26,11 @@ import type { ThinkingLevel } from "./config.ts";
 const PROFILE = "sdk-minimal";
 const PROVIDER = "deepseek-official";
 const DEFAULT_MODEL = "deepseek-flash";
-/** dsh's deepseek llm plugin knows exactly four efforts; Pi's seven levels fold onto them. */
+/**
+ * dsh's deepseek llm plugin knows exactly four efforts; Pi's seven levels fold onto them: off stays
+ * off, minimal and low both mean low, medium/high/xhigh all mean high, max stays max. All seven rows
+ * are asserted against this table by tests/dsh-agent-repro.ts.
+ */
 const EFFORT: Record<ThinkingLevel, string> = {
   off: "off",
   minimal: "low",

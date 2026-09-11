@@ -11,14 +11,19 @@ import { dshAgent } from "../scripts/dsh-agent.ts";
 import { DshRuntime } from "../scripts/dsh-runtime.ts";
 import { conflictPersona, implementPersona, implementTask, readTddSkill, REVIEW_AXES, reviewPersona, reviewTask } from "../scripts/prompt.ts";
 import { sessionEnv } from "../scripts/worktree-env.ts";
-import { expect, expectEqual, expectReject, mkTemp, runScript } from "./target.ts";
+import { expect, expectEqual, expectReject, mkTemp, runScript, sleep } from "./target.ts";
 
-const STUB = `#!${process.execPath}
+/** One stub source under two names, so `tag` tells the DSH_BIN override from the PATH default. */
+const stubSource = (tag: string) => `#!${process.execPath}
 import { mkdirSync, writeFileSync } from "node:fs";
 const seen = process.env.STUB_SEEN;
 const turnKind = process.env.STUB_TURN_KIND ?? "completed";
 const silent = process.env.STUB_SILENT === "1";
+// STUB_HANG accepts the prompt and then never reports idle: a wedged turn only the wall clock ends.
+const hang = process.env.STUB_HANG === "1";
 const record = {
+  tag: ${JSON.stringify(tag)},
+  pid: process.pid,
   argv: process.argv.slice(2),
   home: process.env.DSH_HOME,
   baseUrl: process.env.DEEPSEEK_BASE_URL,
@@ -56,18 +61,30 @@ function handle(message) {
     writeFileSync([dir, "session.v3.jsonl"].join("/"), JSON.stringify({ stub: true }) + "\\n");
     reply(message.id, { messageId: "message-1" });
     notify("session.status", { sessionId, status: "running" });
+    if (hang) {
+      // A wedged turn: the prompt was accepted, idle never comes. SIGTERM is recorded so the abort
+      // test can tell the wall clock's SIGKILL from the shutdown grace's SIGTERM.
+      process.on("SIGTERM", () => {
+        writeFileSync(process.env.STUB_TERM, "SIGTERM");
+        process.exit(0);
+      });
+      return;
+    }
     if (!silent) notify("session.event", { sessionId, event: { type: "assistant/message", seq: 11, data: { turn: 1, step: 1, message: { role: "assistant", content: [{ type: "reasoning", text: "THINKING-LEAK" }, { type: "text", text: "STUB-ANSWER" }] } } } });
     notify("session.event", { sessionId, event: { type: "turn/end", seq: 12, data: { turn: 1, reason: { kind: turnKind } } } });
     notify("session.status", { sessionId, status: "idle" });
     return;
   }
   if (message.method === "shutdown") {
+    if (hang) return; // a wedged runtime ignores shutdown too: only the wall clock can end it
     save();
     reply(message.id, {});
     process.exit(0);
   }
 }
 `;
+
+const STUB = stubSource("stub-dsh");
 
 const work = mkTemp("pack-dsh-");
 const home = mkTemp("pack-dsh-home-");
@@ -105,8 +122,10 @@ type Call = {
   level?: ThinkingLevel;
   /** Where the session runs: the Ticket Worktree by default, the Target for the Main cases below. */
   cwd?: string;
+  /** Shortens the wall clock for the abort case; production takes the role's own (roles.ts). */
+  wallMs?: number;
 };
-const run = ({ role, task, persona, model, level = "high", cwd = work }: Call) =>
+const run = ({ role, task, persona, model, level = "high", cwd = work, wallMs }: Call) =>
   dshAgent({
     cwd,
     // The seam's transform from the module that owns it: the same value roles.ts puts on the opts, and
@@ -119,7 +138,21 @@ const run = ({ role, task, persona, model, level = "high", cwd = work }: Call) =
     thinkingLevel: level,
     prompt: task,
     persona,
+    wallMs,
   });
+
+/** SIGKILL reaps asynchronously, so a killed child's pid is polled rather than read once. */
+async function gone(pid: number): Promise<boolean> {
+  for (let i = 0; i < 100; i++) {
+    try {
+      process.kill(pid, 0);
+    } catch {
+      return true;
+    }
+    await sleep(20);
+  }
+  return false;
+}
 
 try {
   // The dsh implement node's persona is composed from a skill tree the caller names; this run points
@@ -197,6 +230,31 @@ try {
   expectEqual("a turn with no assistant text answers none", quiet.answer, { kind: "none" });
   delete process.env.STUB_SILENT;
 
+  // The wall clock is this runner's only cancel - the dsh subset has no session.abort() - so the
+  // deadline kills the child (dsh-agent.ts) and the turn comes back aborted. It is a turn-level
+  // error, not a RunnerUnavailable, because the handshake had already completed (dsh-runtime.ts
+  // hasStarted); `wallMs` is the defaulted option that makes that deadline reachable here.
+  const hangSeen = join(work, "hang-seen.json");
+  const termMark = join(work, "hang-sigterm");
+  process.env.STUB_SEEN = hangSeen;
+  process.env.STUB_HANG = "1";
+  process.env.STUB_TERM = termMark;
+  const wedged = await run({
+    role: "conflict",
+    task: "resolve the conflict",
+    persona: conflictPersona(),
+    wallMs: 500,
+  });
+  const hung = JSON.parse(readFileSync(hangSeen, "utf8")) as Record<string, any>;
+  expect("the abort lands after the handshake, on the turn side of hasStarted()", hung.initialize !== undefined);
+  expectEqual("a turn past its wall clock is reported aborted", wedged.lastError, "agent aborted after wall clock");
+  expectEqual("an aborted turn spoke no answer", wedged.answer, { kind: "none" });
+  expect("the deadline killed the child", await gone(hung.pid));
+  expect("its SIGKILL ends the child, not the shutdown grace's SIGTERM", !existsSync(termMark));
+  delete process.env.STUB_HANG;
+  delete process.env.STUB_TERM;
+  process.env.STUB_SEEN = seen;
+
   const reviewPayload = reviewTask("abc", "head1", "c1 do a thing\n");
   const review = await run({
     role: "review",
@@ -216,10 +274,13 @@ try {
   expect("review persona carries its axis", got3.persona.includes(`Your axis: ${REVIEW_AXES[0]}`));
   expectEqual("review returns its answer too", review.answer, { kind: "text", text: "STUB-ANSWER" });
 
+  // The fold's intent is stated once, with EFFORT in dsh-agent.ts; this is all seven levels, one table.
   for (const [level, effort] of [
     ["off", "off"],
     ["minimal", "low"],
+    ["low", "low"],
     ["medium", "high"],
+    ["high", "high"],
     ["xhigh", "high"],
     ["max", "max"],
   ] as const) {
@@ -313,6 +374,34 @@ try {
   expect("runtime leaks no reasoning part", !(rt.lastMessage() ?? "").includes("THINKING-LEAK"));
   await rt.close();
 
+  // DSH_BIN is the runtime's test hook, read from process.env rather than from the caller's
+  // environment (dsh-runtime.ts). Set, the child is exactly that path; unset, the runtime spawns
+  // `dsh` with Bun resolving it off the child environment's PATH. That PATH also holds a `dsh`, so
+  // the set branch proves the hook wins over PATH rather than merely that PATH works.
+  const binDir = join(work, "bin");
+  mkdirSync(binDir, { recursive: true });
+  const pathDsh = join(binDir, "dsh");
+  writeFileSync(pathDsh, stubSource("path-dsh"));
+  chmodSync(pathDsh, 0o755);
+  const bareRun = async (into: string) => {
+    const bare = new DshRuntime({
+      cwd: work,
+      env: { PATH: binDir, STUB_SEEN: into, DSH_HOME: home },
+      argv: ["--profile", "sdk-minimal"],
+      provider: "bare-provider",
+      model: "bare-model",
+      effort: "low",
+    });
+    await bare.run("WHO-AM-I");
+    await bare.close();
+    return JSON.parse(readFileSync(into, "utf8")) as Record<string, any>;
+  };
+  process.env.DSH_BIN = stub;
+  expectEqual("DSH_BIN picks the child over the PATH", (await bareRun(join(work, "bin-seen.json"))).tag, "stub-dsh");
+  delete process.env.DSH_BIN;
+  expectEqual("with DSH_BIN unset the child is `dsh` off the PATH", (await bareRun(join(work, "path-seen.json"))).tag, "path-dsh");
+  process.env.DSH_BIN = stub;
+
   console.log(JSON.stringify({ ok: true }));
 } catch (e) {
   console.log(JSON.stringify({ ok: false, error: e instanceof Error ? e.message : String(e) }));
@@ -326,6 +415,8 @@ try {
     "STUB_SEEN",
     "STUB_TURN_KIND",
     "STUB_SILENT",
+    "STUB_HANG",
+    "STUB_TERM",
   ] as const) {
     if (saved[key] === undefined) delete process.env[key];
     else process.env[key] = saved[key];
